@@ -1,130 +1,113 @@
-import { useState } from "react";
-import heroImg from "./assets/hero.png";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "./assets/vite.svg";
-import "./App.css";
+import { DeckGL, GeoJsonLayer, type MapViewState } from "deck.gl";
+import { useEffect, useRef, useState } from "react";
+import { Map as BaseMap } from "react-map-gl/maplibre";
+import { initRentalDb, type TableCount } from "@/lib/duckdb";
 
-function App() {
-	const [count, setCount] = useState(0);
+const SAL_URL = `${import.meta.env.BASE_URL}data/selected_sal_2021_aust_gda2020.geojson`;
+
+// CartoDB's dark-matter style is a free, no-auth MapLibre style. Matches the
+// aesthetic of the predecessor VanillaJS site (see docs/context/history.md).
+const MAP_STYLE =
+	"https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+
+const INITIAL_VIEW_STATE: MapViewState = {
+	longitude: 144.9631,
+	latitude: -37.8136,
+	zoom: 9,
+	pitch: 0,
+	bearing: 0,
+};
+
+type DbStatus =
+	| { state: "loading"; message: string }
+	| { state: "ready"; message: string; tables: TableCount[] }
+	| { state: "error"; message: string };
+
+const App = () => {
+	const [status, setStatus] = useState<DbStatus>({
+		state: "loading",
+		message: "Initialising DuckDB…",
+	});
+	// React 19 StrictMode double-invokes effects in dev. Guard so we don't
+	// instantiate two DuckDB workers on mount.
+	const initOnce = useRef(false);
+
+	useEffect(() => {
+		if (initOnce.current) return;
+		initOnce.current = true;
+
+		initRentalDb({
+			onProgress: (message) => setStatus({ state: "loading", message }),
+		})
+			.then((tables) =>
+				setStatus({
+					state: "ready",
+					message: `Connected · ${tables.length} table${tables.length === 1 ? "" : "s"}`,
+					tables,
+				}),
+			)
+			.catch((err: unknown) => {
+				const message = err instanceof Error ? err.message : String(err);
+				setStatus({ state: "error", message });
+				console.error("DuckDB init failed:", err);
+			});
+	}, []);
+
+	const layers = [
+		new GeoJsonLayer({
+			id: "suburbs-sal",
+			data: SAL_URL,
+			stroked: true,
+			filled: true,
+			pickable: true,
+			getFillColor: [200, 200, 50, 20],
+			getLineColor: [200, 200, 50, 180],
+			getLineWidth: 2,
+			lineWidthMinPixels: 1,
+		}),
+	];
 
 	return (
-		<>
-			<section id="center">
-				<div className="hero">
-					<img src={heroImg} className="base" width="170" height="179" alt="" />
-					<img src={reactLogo} className="framework" alt="React logo" />
-					<img src={viteLogo} className="vite" alt="Vite logo" />
-				</div>
-				<div>
-					<h1>Get started</h1>
-					<p>
-						Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-					</p>
-				</div>
-				<button
-					type="button"
-					className="counter"
-					onClick={() => setCount((count) => count + 1)}
-				>
-					Count is {count}
-				</button>
-			</section>
-
-			<div className="ticks"></div>
-
-			<section id="next-steps">
-				<div id="docs">
-					<svg className="icon" role="presentation" aria-hidden="true">
-						<use href="/icons.svg#documentation-icon"></use>
-					</svg>
-					<h2>Documentation</h2>
-					<p>Your questions, answered</p>
-					<ul>
-						<li>
-							<a href="https://vite.dev/" target="_blank" rel="noopener">
-								<img className="logo" src={viteLogo} alt="" />
-								Explore Vite
-							</a>
-						</li>
-						<li>
-							<a href="https://react.dev/" target="_blank" rel="noopener">
-								<img className="button-icon" src={reactLogo} alt="" />
-								Learn more
-							</a>
-						</li>
-					</ul>
-				</div>
-				<div id="social">
-					<svg className="icon" role="presentation" aria-hidden="true">
-						<use href="/icons.svg#social-icon"></use>
-					</svg>
-					<h2>Connect with us</h2>
-					<p>Join the Vite community</p>
-					<ul>
-						<li>
-							<a
-								href="https://github.com/vitejs/vite"
-								target="_blank"
-								rel="noopener"
-							>
-								<svg
-									className="button-icon"
-									role="presentation"
-									aria-hidden="true"
-								>
-									<use href="/icons.svg#github-icon"></use>
-								</svg>
-								GitHub
-							</a>
-						</li>
-						<li>
-							<a href="https://chat.vite.dev/" target="_blank" rel="noopener">
-								<svg
-									className="button-icon"
-									role="presentation"
-									aria-hidden="true"
-								>
-									<use href="/icons.svg#discord-icon"></use>
-								</svg>
-								Discord
-							</a>
-						</li>
-						<li>
-							<a href="https://x.com/vite_js" target="_blank" rel="noopener">
-								<svg
-									className="button-icon"
-									role="presentation"
-									aria-hidden="true"
-								>
-									<use href="/icons.svg#x-icon"></use>
-								</svg>
-								X.com
-							</a>
-						</li>
-						<li>
-							<a
-								href="https://bsky.app/profile/vite.dev"
-								target="_blank"
-								rel="noopener"
-							>
-								<svg
-									className="button-icon"
-									role="presentation"
-									aria-hidden="true"
-								>
-									<use href="/icons.svg#bluesky-icon"></use>
-								</svg>
-								Bluesky
-							</a>
-						</li>
-					</ul>
-				</div>
-			</section>
-
-			<div className="ticks"></div>
-			<section id="spacer"></section>
-		</>
+		<div className="absolute inset-0 bg-neutral-900">
+			<DeckGL initialViewState={INITIAL_VIEW_STATE} controller layers={layers}>
+				<BaseMap mapStyle={MAP_STYLE} />
+			</DeckGL>
+			<StatusPanel status={status} />
+		</div>
 	);
-}
+};
+
+const DOT_COLOR: Record<DbStatus["state"], string> = {
+	loading: "#ffa500",
+	ready: "#00c864",
+	error: "#ff4444",
+};
+
+const StatusPanel = ({ status }: { status: DbStatus }) => (
+	<aside className="absolute top-4 left-4 z-10 max-w-xs rounded-md bg-white/95 px-4 py-3 text-sm shadow-md backdrop-blur">
+		<h1 className="mb-1 text-base font-semibold text-neutral-900">
+			How's the Serenity?
+		</h1>
+		<div className="mb-2 flex items-center gap-2 text-neutral-700">
+			<span
+				className="inline-block h-2 w-2 rounded-full"
+				style={{ background: DOT_COLOR[status.state] }}
+				aria-hidden="true"
+			/>
+			<span>{status.message}</span>
+		</div>
+		{status.state === "ready" && status.tables.length > 0 && (
+			<ul className="space-y-0.5 text-xs text-neutral-600">
+				{status.tables.map((t) => (
+					<li key={t.name}>
+						<code className="rounded bg-neutral-100 px-1 py-0.5">{t.name}</code>
+						{" · "}
+						{t.rows.toLocaleString()} rows
+					</li>
+				))}
+			</ul>
+		)}
+	</aside>
+);
 
 export default App;

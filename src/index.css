@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -121,8 +122,13 @@
 	* {
 		@apply border-border outline-ring/50;
 	}
+	html,
+	body,
+	#root {
+		@apply h-full w-full;
+	}
 	body {
-		@apply bg-background text-foreground;
+		@apply m-0 overflow-hidden bg-background text-foreground;
 	}
 	html {
 		@apply font-sans;
