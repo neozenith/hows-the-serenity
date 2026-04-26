@@ -31,20 +31,39 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install TypeScript dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
 
       - name: Audit dependencies
         run: bun audit --audit-level=high
 
-      - name: Lint & format check
+      - name: Lint & format check (TypeScript)
         run: bunx --bun biome ci .
 
-      - name: Type check & build
+      - name: Lint & format check (Python)
+        run: |
+          uv run ruff check etl
+          uv run ruff format --check etl
+
+      - name: Type check (Python)
+        run: uv run mypy etl
+
+      - name: Type check & build (TypeScript)
         run: bun run build
 
-      - name: Run unit tests
+      - name: Run unit tests (TypeScript)
         run: bun run test --run --passWithNoTests
+
+      - name: Run unit tests (Python)
+        run: uv run pytest
 
       - name: Cache Playwright browsers
         uses: actions/cache@v5

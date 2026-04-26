@@ -1,9 +1,16 @@
-import { DeckGL, GeoJsonLayer, type MapViewState } from "deck.gl";
+import { DeckGL, type MapViewState, MVTLayer } from "deck.gl";
 import { useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import { initRentalDb, type TableCount } from "@/lib/duckdb";
 
-const SAL_URL = `${import.meta.env.BASE_URL}data/selected_sal_2021_aust_gda2020.geojson`;
+// MVT tile tree built by the Python ETL: `etl tile sal`. Layout matches the
+// XYZ scheme MVTLayer expects via URL-template substitution.
+const SAL_TILES_URL = `${import.meta.env.BASE_URL}data/tiles/suburbs/{z}/{x}/{y}.pbf`;
+// Source data ranges (matches --min-zoom / --max-zoom passed to the tiler).
+// MVTLayer auto-overzooms beyond max — Deck.GL stretches the deepest available
+// tile rather than 404'ing on z>11.
+const SAL_TILE_MIN_ZOOM = 6;
+const SAL_TILE_MAX_ZOOM = 9;
 
 // CartoDB's dark-matter style is a free, no-auth MapLibre style. Matches the
 // aesthetic of the predecessor VanillaJS site (see docs/context/history.md).
@@ -54,9 +61,11 @@ const App = () => {
 	}, []);
 
 	const layers = [
-		new GeoJsonLayer({
+		new MVTLayer({
 			id: "suburbs-sal",
-			data: SAL_URL,
+			data: SAL_TILES_URL,
+			minZoom: SAL_TILE_MIN_ZOOM,
+			maxZoom: SAL_TILE_MAX_ZOOM,
 			stroked: true,
 			filled: true,
 			pickable: true,

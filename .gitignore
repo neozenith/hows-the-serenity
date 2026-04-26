@@ -44,3 +44,12 @@ data/
 !public/data/
 .playwright-cli/
 .*_cache/
+*.pyc
+__pycache__/
+
+# Python (uv)
+.venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

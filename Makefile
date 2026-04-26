@@ -1,118 +1,173 @@
-.PHONY: help install dev agentic-dev build preview clean
-.PHONY: audit format format-check lint lint-fix fix typecheck
-.PHONY: test test-watch test-ui test-e2e test-e2e-ui ci
+.PHONY: help install install-ts install-py dev agentic-dev build preview clean
+.PHONY: audit audit-ts audit-py
+.PHONY: format format-ts format-py format-check format-check-ts format-check-py
+.PHONY: lint lint-ts lint-py lint-fix lint-fix-ts lint-fix-py
+.PHONY: typecheck typecheck-ts typecheck-py
+.PHONY: test test-ts test-py test-watch test-ui test-e2e test-e2e-ui
+.PHONY: fix ci
+.PHONY: etl-extract etl-publish etl-tile etl-status data
 .PHONY: port-debug port-clean agentic-port-clean
 
 # =============================================================================
 # Port Configuration
 # =============================================================================
-# Human developer port (default Vite port).
 DEV_PORT ?= 5173
-
-# AI agent port (use for `agentic-dev` so it can run in parallel with `dev`).
 AGENTIC_DEV_PORT ?= 5174
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 # =============================================================================
-# Installation
+# Installation (sentinel-file pattern — both ecosystems are idempotent)
 # =============================================================================
-# Sentinel-file pattern: `bun install` only runs when package.json or bun.lock
-# is newer than node_modules/.bun_deps. Every other target chains through
-# `install` for cheap idempotence.
 
-install: node_modules/.bun_deps ## Install dependencies (bun install, idempotent)
+install: install-ts install-py ## Install all deps (bun + uv)
 
+install-ts: node_modules/.bun_deps ## Install TypeScript deps
 node_modules/.bun_deps: package.json bun.lock
 	bun install
 	@touch $@
 
+install-py: .venv/.uv_deps ## Install Python deps
+.venv/.uv_deps: pyproject.toml uv.lock
+	uv sync
+	@touch $@
+
 # =============================================================================
-# Human Developer Targets (default port 5173)
+# Dev servers (TypeScript)
 # =============================================================================
 
-dev: install ## Run Vite dev server for human developers (port 5173)
+dev: install-ts ## Run Vite dev server for human developers (port 5173)
 	@echo "==============================================================================="
-	@echo "| Starting Vite dev server (HUMAN profile)...                                 |"
-	@echo "|                                                                             |"
-	@echo "| http://localhost:$(DEV_PORT)                                                       |"
-	@echo "|                                                                             |"
-	@echo "| For AI agent development: make agentic-dev (port $(AGENTIC_DEV_PORT))                       |"
+	@echo "| Starting Vite dev server (HUMAN profile) — http://localhost:$(DEV_PORT)        |"
 	@echo "==============================================================================="
 	bun run dev -- --port $(DEV_PORT) --strictPort
 
-# =============================================================================
-# AI Agent Development Targets (port 5174)
-# =============================================================================
-
-agentic-dev: install ## Run Vite dev server for AI agent development (port 5174)
+agentic-dev: install-ts ## Run Vite dev server for AI agent development (port 5174)
 	@echo "==============================================================================="
-	@echo "| Starting Vite dev server (AGENTIC CODING profile)...                        |"
-	@echo "|                                                                             |"
-	@echo "| http://localhost:$(AGENTIC_DEV_PORT)                                                       |"
-	@echo "|                                                                             |"
-	@echo "| For human development: make dev (port $(DEV_PORT))                                  |"
+	@echo "| Starting Vite dev server (AGENTIC profile) — http://localhost:$(AGENTIC_DEV_PORT)      |"
 	@echo "==============================================================================="
 	bun run dev -- --port $(AGENTIC_DEV_PORT) --strictPort
 
-# =============================================================================
-# Build & Preview
-# =============================================================================
-
-build: install ## Production build (tsc -b && vite build) -> dist/
+build: install-ts ## Production build (tsc -b && vite build) -> dist/
 	bun run build
 
-preview: install ## Preview the built bundle locally
+preview: install-ts ## Preview the built bundle locally
 	bun run preview
 
 # =============================================================================
-# Code Quality
+# Code Quality — language-suffixed leaves + aggregator meta-targets
 # =============================================================================
-# Single tool for both lint and format: Biome. `lint` is read-only (strict —
-# fails on warnings/info too); `format` modifies whitespace only; `fix` is the
-# "make my code clean" target — applies all auto-fixable lint and format
-# issues including unsafe ones.
+# Aggregator meta-targets (audit / format / lint / typecheck / test) are the
+# public surface — humans run `make ci` and don't think about languages.
+# Each language's tooling lives behind a -ts / -py suffix.
 
-audit: install ## Audit dependencies for known vulnerabilities (high+ severity)
+audit: audit-ts audit-py ## Audit all dependencies (high+ severity only)
+
+audit-ts: install-ts ## Audit TypeScript deps via bun audit
 	bun audit --audit-level=high
 
-format: install ## Auto-format code (Biome format --write — modifies files)
+audit-py: install-py ## Audit Python deps (placeholder — uv pip audit is preview-only)
+	@echo "audit-py: skipped (uv has no stable audit subcommand yet)"
+
+format: format-ts format-py ## Auto-format all code (writes)
+
+format-ts: install-ts ## Auto-format TypeScript with Biome
 	bun run format
 
-format-check: install ## Format check only — fails if any file would be reformatted (no writes)
+format-py: install-py ## Auto-format Python with ruff
+	uv run ruff format etl
+
+format-check: format-check-ts format-check-py ## Format check (no writes — fails on drift)
+
+format-check-ts: install-ts ## Biome format --check
 	bun run format-check
 
-lint: install audit ## Strict check: Biome ci + audit (fails on warnings/info — matches CI)
+format-check-py: install-py ## ruff format --check
+	uv run ruff format --check etl
+
+lint: lint-ts lint-py ## Strict lint (CI-mode — fails on warnings/info too)
+
+lint-ts: install-ts audit-ts ## Biome ci + bun audit
 	bun run lint
 
-lint-fix: install ## Auto-fix lint findings only — leaves formatting alone (Biome lint --write --unsafe)
+lint-py: install-py ## ruff check
+	uv run ruff check etl
+
+lint-fix: lint-fix-ts lint-fix-py ## Auto-fix lint findings (leaves formatting alone)
+
+lint-fix-ts: install-ts ## Biome lint --write --unsafe
 	bun run lint-fix
 
-fix: install format lint-fix ## Auto-fix all fixable lint + format issues (Biome check --write --unsafe + audit)
+lint-fix-py: install-py ## ruff check --fix
+	uv run ruff check --fix etl
 
-typecheck: install ## TypeScript type check (tsc -b, no emit — leaf tsconfigs set noEmit:true)
+typecheck: typecheck-ts typecheck-py ## Type check all code
+
+typecheck-ts: install-ts ## tsc -b (no emit — leaf tsconfigs set noEmit)
 	bunx --bun tsc -b
 
-test: install ## Run Vitest unit tests once (passes if no test files yet)
+typecheck-py: install-py ## mypy (strict) on the etl package
+	uv run mypy etl
+
+test: test-ts test-py ## Run all unit tests (does NOT run e2e — see test-e2e)
+
+test-ts: install-ts ## Vitest single-pass
 	bun run test --run --passWithNoTests
 
-test-ui: install ## Run Vitest with the @vitest/ui dashboard
+test-py: install-py ## pytest on etl/tests
+	uv run pytest
+
+test-watch: install-ts ## Vitest in watch mode
+	bun run test
+
+test-ui: install-ts ## Vitest @vitest/ui dashboard
 	bun run test:ui
 
-test-e2e: install ## Run Playwright e2e tests (auto-starts dev server on agentic port)
+test-e2e: install-ts ## Playwright e2e (auto-starts dev server on agentic port)
 	bun run test:e2e
 
-test-e2e-ui: install ## Run Playwright in interactive UI mode
+test-e2e-ui: install-ts ## Playwright in interactive UI mode
 	bun run test:e2e -- --ui
 
-ci: audit build format-check typecheck lint test test-e2e ## Run all CI checks (typecheck → lint → unit tests → e2e)
+# =============================================================================
+# Inner-loop meta-targets — `make fix ci` is the canonical sequence
+# =============================================================================
+
+fix: install format lint-fix ## Auto-fix all fixable lint + format issues across both languages
+
+ci: audit build format-check typecheck lint test test-e2e ## Full CI gate (mirrors GitHub Actions)
+
+# =============================================================================
+# ETL pipeline — Python; produces files under data/converted/ and public/data/
+# =============================================================================
+# File-rule targets give Make-native dependency tracking: rerun publish/tile
+# steps without re-extracting if only the publish/tile code changed.
+
+ETL_RUN := uv run -m etl
+SAL_ZIP := data/originals/boundaries/SAL_2021_AUST_GDA2020_SHP.zip
+SAL_PARQUET := data/converted/sal_2021_aust_gda2020.parquet
+SAL_TILES_DIR := public/data/tiles/suburbs
+
+etl-extract: $(SAL_PARQUET) ## Extract SAL zip -> GeoParquet intermediate
+$(SAL_PARQUET): $(SAL_ZIP) | install-py
+	$(ETL_RUN) extract sal --input $< --output $@
+
+etl-tile: $(SAL_TILES_DIR) ## Tile SAL parquet -> MVT XYZ tile tree
+$(SAL_TILES_DIR): $(SAL_PARQUET) | install-py
+	$(ETL_RUN) tile sal --input $<
+
+etl-publish: install-py ## Publish full SAL parquet -> single GeoJSON (legacy / reference)
+	$(ETL_RUN) publish sal
+
+etl-status: install-py ## Show pipeline artifact status
+	$(ETL_RUN) status
+
+data: etl-extract etl-tile ## Build all geospatial outputs (extract + tile)
 
 # =============================================================================
 # Port Management
 # =============================================================================
-# `port-clean` and `agentic-port-clean` are deliberately split so the human
-# and the agent can each clean up their own port without disturbing the other.
 
 port-debug: ## Show which dev ports are in use
 	@pid=$$(lsof -ti:$(DEV_PORT) 2>&1); [ -n "$$pid" ] && echo "Port $(DEV_PORT) (human)   in use by PID $$pid" || echo "Port $(DEV_PORT) (human)   free."
@@ -128,11 +183,5 @@ agentic-port-clean: ## Kill processes on the agentic dev port only
 # Cleanup
 # =============================================================================
 
-clean: ## Clean up build artifacts, test outputs, deps, and tmp/
-	rm -rf dist
-	rm -rf coverage
-	rm -rf e2e-screenshots
-	rm -rf playwright-report
-	rm -rf test-results
-	rm -rf node_modules
-	rm -rf tmp
+clean: ## Clean build artifacts, test outputs, deps, venv, tmp
+	rm -rf dist coverage e2e-screenshots playwright-report test-results node_modules .venv tmp
