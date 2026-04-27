@@ -9,13 +9,35 @@ export type SuburbTimeSeries = {
 	points: ReadonlyArray<{ ts: Date; value: number }>;
 };
 
-// Row shape from the prepared statement below — used to drive the grouping.
+// Row shape from the prepared statement. DuckDB-WASM's DATE handling has
+// drifted across versions: sometimes a JS Date, sometimes an Int32 of
+// days-since-epoch. `value` is DOUBLE -> JS number; the categorical
+// columns are VARCHAR -> string. The `time_bucket` field is `unknown`
+// here because we normalize via `tsToDate` below.
 type Row = {
 	data_type: string;
 	dwelling_type: string;
 	bedrooms: string;
-	time_bucket: Date;
+	time_bucket: unknown;
 	value: number;
+};
+
+// Coerce DuckDB-WASM's DATE value into a JS Date, regardless of which
+// representation the runtime hands us back.
+const MS_PER_DAY = 86_400_000;
+const tsToDate = (ts: unknown): Date => {
+	if (ts instanceof Date) return ts;
+	if (typeof ts === "number") {
+		// Heuristic: small numbers are days-since-epoch (DuckDB DATE format),
+		// large numbers are ms-since-epoch (already converted). 1e10 ms is
+		// well past 1970; 1e10 days is millions of years — clear separator.
+		return new Date(ts > 1e10 ? ts : ts * MS_PER_DAY);
+	}
+	if (typeof ts === "bigint") {
+		// Could come through as bigint in some Arrow configs.
+		return new Date(Number(ts));
+	}
+	return new Date(String(ts));
 };
 
 // Match by SAL_CODE21 against the hyphen-joined `geospatial_codes` field.
@@ -61,8 +83,8 @@ export const querySuburbTimeSeries = async (
 				groups.set(key, g);
 			}
 			(g.points as { ts: Date; value: number }[]).push({
-				ts: new Date(r.time_bucket),
-				value: r.value,
+				ts: tsToDate(r.time_bucket),
+				value: typeof r.value === "number" ? r.value : Number(r.value),
 			});
 		}
 		return Array.from(groups.values());

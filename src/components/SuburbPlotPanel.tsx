@@ -1,8 +1,10 @@
 import { lazy, Suspense } from "react";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 // Lazy import — Plotly + the rental-sales query module land in their own
 // chunk that only downloads when the user first clicks a suburb. Without
-// this the eager bundle gains ~700 KB.
+// this the eager bundle gains ~700 KB. Wrapped in an ErrorBoundary so a
+// failed chunk load OR a Plotly render exception doesn't crash the App.
 const SuburbPlot = lazy(() => import("./SuburbPlot"));
 
 export type SuburbSelection = { name: string; code: string };
@@ -33,15 +35,17 @@ export const SuburbPlotPanel = ({
 					<span aria-hidden="true">×</span>
 				</button>
 			</header>
-			<Suspense
-				fallback={
-					<div className="px-2 py-8 text-xs text-neutral-500">
-						Loading chart…
-					</div>
-				}
-			>
-				<SuburbPlot salCode={selection.code} />
-			</Suspense>
+			<ErrorBoundary>
+				<Suspense
+					fallback={
+						<div className="px-2 py-8 text-xs text-neutral-500">
+							Loading chart…
+						</div>
+					}
+				>
+					<SuburbPlot salCode={selection.code} />
+				</Suspense>
+			</ErrorBoundary>
 		</aside>
 	);
 };
