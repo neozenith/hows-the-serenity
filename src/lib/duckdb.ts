@@ -13,6 +13,11 @@ const DB_FILENAME = "rental_sales.duckdb";
 const DB_ALIAS = "rental_sales";
 const DB_URL = `${import.meta.env.BASE_URL}data/${DB_FILENAME}`;
 
+// Module-level singleton connection. Kept open after init so subsequent
+// queries (rental-sales chart) can share the same WASM database without
+// re-fetching the .duckdb file. Don't close until tab close.
+let _conn: duckdb.AsyncDuckDBConnection | null = null;
+
 const toNumber = (v: unknown): number => {
 	if (typeof v === "bigint") return Number(v);
 	if (typeof v === "number") return v;
@@ -22,6 +27,14 @@ const toNumber = (v: unknown): number => {
 export const initRentalDb = async ({
 	onProgress,
 }: InitOptions = {}): Promise<TableCount[]> => {
+	if (_conn) {
+		// Already initialised in this session — just re-list tables for the
+		// status panel without re-fetching the .duckdb file. React StrictMode
+		// double-invokes effects in dev so this guard matters.
+		const counts = await listTableCounts(_conn);
+		return counts;
+	}
+
 	onProgress?.("Selecting DuckDB bundle…");
 	const bundles = duckdb.getJsDelivrBundles();
 	const bundle = await duckdb.selectBundle(bundles);
@@ -60,7 +73,15 @@ export const initRentalDb = async ({
 	await db.registerFileBuffer(DB_FILENAME, buffer);
 	await conn.query(`ATTACH '${DB_FILENAME}' AS ${DB_ALIAS} (READ_ONLY);`);
 
+	_conn = conn;
+
 	onProgress?.("Counting tables…");
+	return listTableCounts(conn);
+};
+
+const listTableCounts = async (
+	conn: duckdb.AsyncDuckDBConnection,
+): Promise<TableCount[]> => {
 	const tablesResult = await conn.query(
 		`SELECT table_name FROM information_schema.tables
 		 WHERE table_catalog = '${DB_ALIAS}' AND table_schema = 'main'
@@ -80,7 +101,11 @@ export const initRentalDb = async ({
 		const row = countResult.toArray()[0] as { n?: unknown } | undefined;
 		counts.push({ name, rows: toNumber(row?.n) });
 	}
-
-	await conn.close();
 	return counts;
 };
+
+// Public accessor so other modules (rental-sales-query.ts) can run queries
+// against the already-attached database without re-fetching the file.
+export const getRentalDbConn = (): duckdb.AsyncDuckDBConnection | null => _conn;
+
+export const RENTAL_DB_ALIAS = DB_ALIAS;

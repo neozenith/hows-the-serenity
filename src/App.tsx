@@ -1,6 +1,7 @@
 import { DeckGL, GeoJsonLayer, type MapViewState, MVTLayer } from "deck.gl";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
+import { SuburbPlotPanel } from "@/components/SuburbPlotPanel";
 import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
 import { initRentalDb, type TableCount } from "@/lib/duckdb";
 import {
@@ -198,6 +199,7 @@ const App = () => {
 		regionalTrainLines: null,
 		regionalTrainStops: null,
 	});
+	const [selectedSuburb, setSelectedSuburb] = useState<string | null>(null);
 	const [visible, setVisible] = useState<LayerVisibility>({
 		suburbs: true,
 		iso5: true,
@@ -309,6 +311,12 @@ const App = () => {
 				getLineWidth: 2,
 				lineWidthMinPixels: 1,
 				fetch: makeGatedTileFetch(manifests.suburbs),
+				onClick: (info: {
+					object?: { properties?: Record<string, unknown> } | null;
+				}) => {
+					const name = info.object?.properties?.SAL_NAME21;
+					if (typeof name === "string") setSelectedSuburb(name);
+				},
 				...tileLifecycle("suburbs-sal"),
 			}),
 		manifests.iso15 &&
@@ -506,6 +514,10 @@ const App = () => {
 				zoomLabelRef={zoomLabelRef}
 			/>
 			<TileMemoryOverlay />
+			<SuburbPlotPanel
+				suburb={selectedSuburb}
+				onClose={() => setSelectedSuburb(null)}
+			/>
 		</div>
 	);
 };
