@@ -1,5 +1,5 @@
 import { DeckGL, type MapViewState, MVTLayer } from "deck.gl";
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import { initRentalDb, type TableCount } from "@/lib/duckdb";
 import {
@@ -122,6 +122,15 @@ const App = () => {
 	// React 19 StrictMode double-invokes effects in dev. Guard so we don't
 	// instantiate two DuckDB workers on mount.
 	const initOnce = useRef(false);
+
+	// Live zoom label — imperative DOM update via this ref so the panel header
+	// can show the current zoom without lifting Deck.GL's viewState into React
+	// state (which would recreate the layer array on every pan/zoom frame).
+	// The handler is inlined on the DeckGL prop below; that's fine because
+	// `App` only re-renders when its React state actually changes — not per
+	// viewport frame — so the callback identity churn isn't a hot path. See
+	// the project's Deck.GL-native ADR memory.
+	const zoomLabelRef = useRef<HTMLSpanElement | null>(null);
 
 	useEffect(() => {
 		if (initOnce.current) return;
@@ -333,10 +342,27 @@ const App = () => {
 
 	return (
 		<div className="absolute inset-0 bg-neutral-900">
-			<DeckGL initialViewState={INITIAL_VIEW_STATE} controller layers={layers}>
+			<DeckGL
+				initialViewState={INITIAL_VIEW_STATE}
+				onViewStateChange={(params) => {
+					// `viewState` is generically typed as MapViewState | TransitionProps;
+					// we know it's MapView here so a narrow cast is safe.
+					const zoom = (params.viewState as MapViewState).zoom;
+					if (zoomLabelRef.current && typeof zoom === "number") {
+						zoomLabelRef.current.textContent = `z ${zoom.toFixed(1)}`;
+					}
+				}}
+				controller
+				layers={layers}
+			>
 				<BaseMap mapStyle={MAP_STYLE} />
 			</DeckGL>
-			<ControlPanel status={status} visible={visible} onToggle={toggle} />
+			<ControlPanel
+				status={status}
+				visible={visible}
+				onToggle={toggle}
+				zoomLabelRef={zoomLabelRef}
+			/>
 		</div>
 	);
 };
@@ -351,10 +377,12 @@ const ControlPanel = ({
 	status,
 	visible,
 	onToggle,
+	zoomLabelRef,
 }: {
 	status: DbStatus;
 	visible: LayerVisibility;
 	onToggle: (key: LayerKey) => void;
+	zoomLabelRef: RefObject<HTMLSpanElement | null>;
 }) => {
 	const [collapsed, setCollapsed] = useState(false);
 	return (
@@ -374,15 +402,26 @@ const ControlPanel = ({
 						How's the Serenity?
 					</h1>
 				</div>
-				<button
-					type="button"
-					onClick={() => setCollapsed((c) => !c)}
-					aria-expanded={!collapsed}
-					aria-label={collapsed ? "Show controls" : "Hide controls"}
-					className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-				>
-					<span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
-				</button>
+				<div className="flex items-center gap-1.5">
+					{/* DOM-updated by handleViewStateChange — keeps textContent fresh
+					    without round-tripping through React state. */}
+					<span
+						ref={zoomLabelRef}
+						className="text-xs tabular-nums text-neutral-500"
+						aria-label="Current zoom level"
+					>
+						z {INITIAL_VIEW_STATE.zoom.toFixed(1)}
+					</span>
+					<button
+						type="button"
+						onClick={() => setCollapsed((c) => !c)}
+						aria-expanded={!collapsed}
+						aria-label={collapsed ? "Show controls" : "Hide controls"}
+						className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+					>
+						<span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+					</button>
+				</div>
 			</header>
 			{!collapsed && (
 				<div className="mt-2 space-y-3">
