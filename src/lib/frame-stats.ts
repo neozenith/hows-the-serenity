@@ -55,7 +55,10 @@ const tick = (ts: number) => {
 
 // Module init — only in the browser. jsdom (used by Vitest) has rAF; node SSR
 // builds wouldn't, but this app doesn't SSR.
-if (typeof window !== "undefined" && typeof requestAnimationFrame === "function") {
+if (
+	typeof window !== "undefined" &&
+	typeof requestAnimationFrame === "function"
+) {
 	requestAnimationFrame(tick);
 }
 

@@ -57,11 +57,14 @@ export const TileMemoryOverlay = () => {
 			const tileCount = layer?.tileCount ?? 0;
 			const series = layer?.series ?? [];
 
-			if (totalBytesRef.current) totalBytesRef.current.textContent = FORMAT_MB(totalBytes);
-			if (tileCountRef.current) tileCountRef.current.textContent = String(tileCount);
+			if (totalBytesRef.current)
+				totalBytesRef.current.textContent = FORMAT_MB(totalBytes);
+			if (tileCountRef.current)
+				tileCountRef.current.textContent = String(tileCount);
 			if (totalBytes > peakBytesValue.current) {
 				peakBytesValue.current = totalBytes;
-				if (peakBytesRef.current) peakBytesRef.current.textContent = FORMAT_MB(peakBytesValue.current);
+				if (peakBytesRef.current)
+					peakBytesRef.current.textContent = FORMAT_MB(peakBytesValue.current);
 			}
 
 			if (!tilePolylineRef.current) return;
@@ -79,7 +82,8 @@ export const TileMemoryOverlay = () => {
 			const pts = series
 				.map((p) => {
 					const x = ((p.ts - firstTs) / tSpan) * TILE_CHART_W;
-					const y = TILE_CHART_H - (p.cumulativeBytes / maxBytes) * TILE_CHART_H;
+					const y =
+						TILE_CHART_H - (p.cumulativeBytes / maxBytes) * TILE_CHART_H;
 					return `${x.toFixed(1)},${y.toFixed(1)}`;
 				})
 				.join(" ");
@@ -110,7 +114,8 @@ export const TileMemoryOverlay = () => {
 				.map((ms, i) => {
 					const x = i * stepX;
 					const clamped = Math.min(ms, FRAME_CHART_CAP_MS);
-					const y = FRAME_CHART_H - (clamped / FRAME_CHART_CAP_MS) * FRAME_CHART_H;
+					const y =
+						FRAME_CHART_H - (clamped / FRAME_CHART_CAP_MS) * FRAME_CHART_H;
 					return `${x.toFixed(1)},${y.toFixed(1)}`;
 				})
 				.join(" ");
@@ -121,7 +126,8 @@ export const TileMemoryOverlay = () => {
 	}, []);
 
 	const longFrameThresholdY =
-		FRAME_CHART_H - (LONG_FRAME_THRESHOLD_MS / FRAME_CHART_CAP_MS) * FRAME_CHART_H;
+		FRAME_CHART_H -
+		(LONG_FRAME_THRESHOLD_MS / FRAME_CHART_CAP_MS) * FRAME_CHART_H;
 
 	return (
 		<aside
@@ -157,7 +163,10 @@ export const TileMemoryOverlay = () => {
 							<div>
 								<dt className="text-neutral-500">tiles</dt>
 								<dd>
-									<span ref={tileCountRef} className="tabular-nums text-neutral-900">
+									<span
+										ref={tileCountRef}
+										className="tabular-nums text-neutral-900"
+									>
 										0
 									</span>
 								</dd>
@@ -165,7 +174,10 @@ export const TileMemoryOverlay = () => {
 							<div>
 								<dt className="text-neutral-500">live</dt>
 								<dd>
-									<span ref={totalBytesRef} className="tabular-nums text-neutral-900">
+									<span
+										ref={totalBytesRef}
+										className="tabular-nums text-neutral-900"
+									>
 										0.00 MB
 									</span>
 								</dd>
@@ -173,7 +185,10 @@ export const TileMemoryOverlay = () => {
 							<div>
 								<dt className="text-neutral-500">peak</dt>
 								<dd>
-									<span ref={peakBytesRef} className="tabular-nums text-neutral-900">
+									<span
+										ref={peakBytesRef}
+										className="tabular-nums text-neutral-900"
+									>
 										0.00 MB
 									</span>
 								</dd>
@@ -198,7 +213,9 @@ export const TileMemoryOverlay = () => {
 
 					{/* Frame timing section */}
 					<section>
-						<h3 className="mb-1 font-semibold text-neutral-700">Frame timing</h3>
+						<h3 className="mb-1 font-semibold text-neutral-700">
+							Frame timing
+						</h3>
 						<dl className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600">
 							<div>
 								<dt className="text-neutral-500">fps</dt>
@@ -211,7 +228,10 @@ export const TileMemoryOverlay = () => {
 							<div>
 								<dt className="text-neutral-500">last</dt>
 								<dd>
-									<span ref={lastFrameRef} className="tabular-nums text-neutral-900">
+									<span
+										ref={lastFrameRef}
+										className="tabular-nums text-neutral-900"
+									>
 										0.0 ms
 									</span>
 								</dd>
@@ -219,7 +239,10 @@ export const TileMemoryOverlay = () => {
 							<div>
 								<dt className="text-neutral-500">{">50 ms"}</dt>
 								<dd>
-									<span ref={longFramesRef} className="tabular-nums text-neutral-900">
+									<span
+										ref={longFramesRef}
+										className="tabular-nums text-neutral-900"
+									>
 										0
 									</span>
 								</dd>

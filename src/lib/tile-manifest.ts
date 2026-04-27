@@ -45,7 +45,11 @@ export const makeGatedTileFetch = (loaded: LoadedManifest) => {
 	const TILE_URL_PATTERN = /\/(\d+)\/(\d+)\/(\d+)\.pbf(?:\?|$)/;
 	return async (
 		url: string,
-		context: { loadOptions?: unknown; signal?: AbortSignal; layer?: { id?: string } },
+		context: {
+			loadOptions?: unknown;
+			signal?: AbortSignal;
+			layer?: { id?: string };
+		},
 	): Promise<unknown> => {
 		const match = url.match(TILE_URL_PATTERN);
 		const tileKey = match ? `${match[1]}/${match[2]}/${match[3]}` : null;
@@ -54,7 +58,10 @@ export const makeGatedTileFetch = (loaded: LoadedManifest) => {
 		// hands the buffer to loaders.gl (which would then own it). MVTLoader
 		// must be passed explicitly — Vite/Pages serve .pbf without a
 		// Content-Type, so loaders.gl's auto-detection has nothing to match.
-		const response = await fetch(url, context.signal ? { signal: context.signal } : {});
+		const response = await fetch(
+			url,
+			context.signal ? { signal: context.signal } : {},
+		);
 		if (!response.ok) {
 			throw new Error(
 				`In-manifest tile fetch failed (manifest claims it exists): ${url} (${response.status})`,

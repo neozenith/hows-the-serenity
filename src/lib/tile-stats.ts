@@ -91,7 +91,11 @@ const emit = (event: TileEvent): void => {
 	for (const fn of listeners) fn(event, snap);
 };
 
-export const recordTileSize = (layerId: string, tileKey: string, bytes: number): void => {
+export const recordTileSize = (
+	layerId: string,
+	tileKey: string,
+	bytes: number,
+): void => {
 	sizeCache.set(cacheKey(layerId, tileKey), bytes);
 };
 
@@ -114,7 +118,13 @@ export const recordTileUnload = (layerId: string, tileKey: string): void => {
 	layer.tileCount -= 1;
 	aggregateBytes -= bytes;
 	aggregateCount -= 1;
-	emit({ ts: performance.now(), layerId, tileKey, bytes: -bytes, reason: "unload" });
+	emit({
+		ts: performance.now(),
+		layerId,
+		tileKey,
+		bytes: -bytes,
+		reason: "unload",
+	});
 };
 
 export const subscribeTileStats = (fn: Listener): (() => void) => {

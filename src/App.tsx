@@ -435,8 +435,9 @@ const ControlPanel = ({
 					    without round-tripping through React state. */}
 					<span
 						ref={zoomLabelRef}
-						className="text-xs tabular-nums text-neutral-500"
+						role="status"
 						aria-label="Current zoom level"
+						className="text-xs tabular-nums text-neutral-500"
 					>
 						z {INITIAL_VIEW_STATE.zoom.toFixed(1)}
 					</span>
