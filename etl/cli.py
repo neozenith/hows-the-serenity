@@ -72,7 +72,11 @@ def _ptv_stops_tiles_dir(mode: str) -> Path:
 
 
 def cmd_extract_sal(args: argparse.Namespace) -> None:
-    extract_sal.run(input_zip=args.input, output_parquet=args.output)
+    extract_sal.run(
+        input_zip=args.input,
+        output_parquet=args.output,
+        state_filter=args.state,
+    )
 
 
 def cmd_publish_sal(args: argparse.Namespace) -> None:
@@ -216,6 +220,11 @@ def build_parser() -> argparse.ArgumentParser:
     sal_extract = extract_sub.add_parser("sal", help="Extract SAL_2021 shapefile zip")
     sal_extract.add_argument("--input", type=Path, default=SAL_ZIP, help="Source zip")
     sal_extract.add_argument("--output", type=Path, default=SAL_PARQUET, help="Output parquet")
+    sal_extract.add_argument(
+        "--state",
+        default="Victoria",
+        help="STE_NAME21 to filter to (default: Victoria; pass empty string for all)",
+    )
     sal_extract.set_defaults(func=cmd_extract_sal)
 
     iso_extract = extract_sub.add_parser(
