@@ -74,6 +74,12 @@ PTV_STOP_KEEP_PROPERTIES = ("STOP_ID", "STOP_NAME", "MODE")
 # mode, ~3 KB total — too small for MVT tiling, served as static GeoJSON.
 PTV_COMMUTE_HULL_KEEP_PROPERTIES = ("MODE", "transit_time_minutes_nearest_tier")
 
+# Rental + sales Excel sources, schema mapping, and outputs.
+RENTAL_SALES_INPUT_DIR = ORIGINALS_DIR / "rental_sales"
+RENTAL_SALES_SCHEMA = Path(__file__).parent / "rental_sales_schema.yaml"
+RENTAL_SALES_PARQUET = CONVERTED_DIR / "rental_sales.parquet"
+RENTAL_SALES_DUCKDB = PUBLIC_DATA_DIR / "rental_sales.duckdb"
+
 # Default Douglas-Peucker tolerance (in EPSG:4326 degrees) for the published
 # single-file GeoJSON. ~0.0001° ≈ 11 m at the equator — invisible at suburb
 # zoom levels (9-13). Set to 0 to disable simplification.

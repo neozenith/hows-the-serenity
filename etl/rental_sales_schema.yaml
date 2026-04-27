@@ -1,0 +1,98 @@
+# Schema mapping for rental + sales Excel sources.
+#
+# Ported from upstream isochrones/scripts/rental_sales/extract_schema_mapping.yaml
+# (commit bdc2961, tag v2.1.0). LGA-granularity files are intentionally
+# OMITTED here — this app currently only renders suburb (SAL) boundaries
+# and the click->plot wiring keys on SAL_NAME21. Re-add LGA blocks when an
+# LGA boundary pipeline lands.
+#
+# `file:` paths are relative to the input root passed at extract time
+# (defaults to data/originals/rental_sales/).
+
+- file: 'rental/Moving annual median rent by suburb and town - March quarter 2025.xlsx'
+  data_type: rental
+  data_frequency: quarterly  # Moving annual by quarter
+  data_granularity: suburb
+  time_bucket_format: '%b %Y'  # MMM YYYY
+  sheets:
+    - sheet: '1 bedroom flat'
+      dwelling_type: unit
+      bedrooms: 1
+      time_bucket_range: D2:GW2
+      statistic: [count, median]  # Alternating columns
+      geospatial_range: B4:B161
+    - sheet: '2 bedroom flat'
+      dwelling_type: unit
+      bedrooms: 2
+      time_bucket_range: D2:GW2
+      statistic: [count, median]
+      geospatial_range: B4:B161
+    - sheet: '3 bedroom flat'
+      dwelling_type: unit
+      bedrooms: 3
+      time_bucket_range: D2:GW2
+      statistic: [count, median]
+      geospatial_range: B4:B161
+    - sheet: '2 bedroom house'
+      dwelling_type: house
+      bedrooms: 2
+      time_bucket_range: D2:GW2
+      statistic: [count, median]
+      geospatial_range: B4:B161
+    - sheet: '3 bedroom house'
+      dwelling_type: house
+      bedrooms: 3
+      time_bucket_range: D2:GW2
+      statistic: [count, median]
+      geospatial_range: B4:B161
+    - sheet: '4 bedroom house'
+      dwelling_type: house
+      bedrooms: 4
+      time_bucket_range: D2:GW2
+      statistic: [count, median]
+      geospatial_range: B4:B161
+    - sheet: 'All properties'
+      dwelling_type: all
+      bedrooms: all
+      time_bucket_range: D2:GW2
+      statistic: [count, median]
+      geospatial_range: B4:B161
+
+- file: 'sales/Houses-by-suburb-2013-2023.xlsx'
+  data_type: sales
+  data_frequency: annual
+  data_granularity: suburb
+  time_bucket_format: '%Y'  # YYYY
+  sheets:
+    - sheet: 'Table 1'
+      dwelling_type: house
+      bedrooms: all
+      time_bucket_range: B2:L2
+      statistic: [median]
+      geospatial_range: A3:A791
+
+- file: 'sales/Units-by-suburb-2013-2023.xlsx'
+  data_type: sales
+  data_frequency: annual
+  data_granularity: suburb
+  time_bucket_format: '%Y'
+  sheets:
+    - sheet: 'Table 1'
+      dwelling_type: unit
+      bedrooms: all
+      time_bucket_range: B2:L2
+      statistic: [median]
+      geospatial_range: A3:A446
+
+- file: 'sales/Vacant-land-by-suburb-2013-2023.xlsx'
+  data_type: sales
+  data_frequency: annual
+  data_granularity: suburb
+  time_bucket_format: '%Y'
+  sheets:
+    - sheet: 'Table 1'
+      dwelling_type: vacant_land
+      bedrooms: 0
+      time_bucket_range: B2:L2
+      statistic: [median]
+      geospatial_range: A3:A218

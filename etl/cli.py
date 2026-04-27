@@ -28,12 +28,17 @@ from etl.config import (
     PTV_STOP_KEEP_PROPERTIES,
     PTV_STOPS_GEOJSON,
     PUBLIC_DATA_DIR,
+    RENTAL_SALES_DUCKDB,
+    RENTAL_SALES_INPUT_DIR,
+    RENTAL_SALES_PARQUET,
+    RENTAL_SALES_SCHEMA,
     SAL_SIMPLIFY_TOLERANCE,
 )
 from etl.logging_setup import configure
 from etl.steps import (
     extract_isochrones,
     extract_ptv,
+    extract_rental_sales,
     extract_sal,
     publish_commute_hulls,
     publish_sal,
@@ -181,6 +186,16 @@ def cmd_publish_commute_hulls(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_extract_rental_sales(args: argparse.Namespace) -> None:
+    extract_rental_sales.run(
+        input_dir=args.input,
+        schema_file=args.schema,
+        sal_parquet=args.sal_parquet,
+        output_parquet=args.output_parquet,
+        output_duckdb=args.output_duckdb,
+    )
+
+
 def cmd_status(_: argparse.Namespace) -> None:
     rows: list[tuple[str, Path, str]] = [
         ("SAL zip (input)", SAL_ZIP, "file"),
@@ -249,6 +264,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="STE_NAME21 to filter to (default: Victoria; pass empty string for all)",
     )
     sal_extract.set_defaults(func=cmd_extract_sal)
+
+    rental_sales_extract = extract_sub.add_parser(
+        "rental-sales",
+        help="Extract rental + sales medians from xlsx -> parquet + duckdb",
+    )
+    rental_sales_extract.add_argument(
+        "--input",
+        type=Path,
+        default=RENTAL_SALES_INPUT_DIR,
+        help="Source dir containing rental_sales/{rental,sales}/*.xlsx",
+    )
+    rental_sales_extract.add_argument(
+        "--schema",
+        type=Path,
+        default=RENTAL_SALES_SCHEMA,
+        help="YAML schema mapping for the xlsx files",
+    )
+    rental_sales_extract.add_argument(
+        "--sal-parquet",
+        type=Path,
+        default=SAL_PARQUET,
+        help="SAL boundary parquet (provides SAL_NAME21 -> SAL_CODE21 lookup)",
+    )
+    rental_sales_extract.add_argument(
+        "--output-parquet",
+        type=Path,
+        default=RENTAL_SALES_PARQUET,
+        help="Output parquet checkpoint",
+    )
+    rental_sales_extract.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="Output DuckDB file (consumed by the frontend)",
+    )
+    rental_sales_extract.set_defaults(func=cmd_extract_rental_sales)
 
     iso_extract = extract_sub.add_parser(
         "isochrones",

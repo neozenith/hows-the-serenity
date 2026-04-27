@@ -1,7 +1,10 @@
 import { DeckGL, GeoJsonLayer, type MapViewState, MVTLayer } from "deck.gl";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
-import { SuburbPlotPanel } from "@/components/SuburbPlotPanel";
+import {
+	SuburbPlotPanel,
+	type SuburbSelection,
+} from "@/components/SuburbPlotPanel";
 import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
 import { initRentalDb, type TableCount } from "@/lib/duckdb";
 import {
@@ -199,7 +202,9 @@ const App = () => {
 		regionalTrainLines: null,
 		regionalTrainStops: null,
 	});
-	const [selectedSuburb, setSelectedSuburb] = useState<string | null>(null);
+	const [selectedSuburb, setSelectedSuburb] = useState<SuburbSelection | null>(
+		null,
+	);
 	const [visible, setVisible] = useState<LayerVisibility>({
 		suburbs: true,
 		iso5: true,
@@ -314,8 +319,12 @@ const App = () => {
 				onClick: (info: {
 					object?: { properties?: Record<string, unknown> } | null;
 				}) => {
-					const name = info.object?.properties?.SAL_NAME21;
-					if (typeof name === "string") setSelectedSuburb(name);
+					const props = info.object?.properties;
+					const name = props?.SAL_NAME21;
+					const code = props?.SAL_CODE21;
+					if (typeof name === "string" && typeof code === "string") {
+						setSelectedSuburb({ name, code });
+					}
 				},
 				...tileLifecycle("suburbs-sal"),
 			}),
@@ -515,7 +524,7 @@ const App = () => {
 			/>
 			<TileMemoryOverlay />
 			<SuburbPlotPanel
-				suburb={selectedSuburb}
+				selection={selectedSuburb}
 				onClose={() => setSelectedSuburb(null)}
 			/>
 		</div>

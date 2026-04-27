@@ -14,19 +14,21 @@ const Plot = createPlotlyComponent(Plotly);
 
 // Default react-lazy export — App imports this via lazy() so the entire
 // plotly+series chunk only loads on the first suburb click.
-export default function SuburbPlot({ suburb }: { suburb: string }) {
+// Identified by SAL_CODE21 (numeric, stable) rather than name (mixed case
+// + hyphen-grouped in the source data).
+export default function SuburbPlot({ salCode }: { salCode: string }) {
 	const [series, setSeries] = useState<SuburbTimeSeries[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		setError(null);
 		setSeries(null);
-		querySuburbTimeSeries(suburb)
+		querySuburbTimeSeries(salCode)
 			.then(setSeries)
 			.catch((err: unknown) => {
 				setError(err instanceof Error ? err.message : String(err));
 			});
-	}, [suburb]);
+	}, [salCode]);
 
 	if (error) {
 		return (
@@ -39,8 +41,9 @@ export default function SuburbPlot({ suburb }: { suburb: string }) {
 	if (series.length === 0) {
 		return (
 			<div className="px-3 py-2 text-xs text-neutral-500">
-				No rental/sales rows match this suburb name. The legacy DB is
-				incompletely keyed by SAL_NAME21 — chunk C will reconcile this.
+				No rental/sales rows for this suburb (SAL_CODE21 not found in any
+				geospatial_codes group). Some real-estate market areas don't map 1:1
+				onto ABS suburb codes.
 			</div>
 		);
 	}

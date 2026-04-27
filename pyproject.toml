@@ -12,6 +12,9 @@ dependencies = [
     "pandas>=2.2",
     "mercantile>=1.2",
     "mapbox-vector-tile>=2.1",
+    "openpyxl>=3.1",
+    "ruamel.yaml>=0.18",
+    "duckdb>=1.1",
 ]
 
 [project.scripts]
@@ -62,6 +65,12 @@ module = [
     "mercantile",
     "mapbox_vector_tile",
     "mapbox_vector_tile.*",
+    "openpyxl",
+    "openpyxl.*",
+    "ruamel",
+    "ruamel.*",
+    "duckdb",
+    "duckdb.*",
 ]
 ignore_missing_imports = true
 

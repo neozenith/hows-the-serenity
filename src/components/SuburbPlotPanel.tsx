@@ -5,18 +5,25 @@ import { lazy, Suspense } from "react";
 // this the eager bundle gains ~700 KB.
 const SuburbPlot = lazy(() => import("./SuburbPlot"));
 
+export type SuburbSelection = { name: string; code: string };
+
 export const SuburbPlotPanel = ({
-	suburb,
+	selection,
 	onClose,
 }: {
-	suburb: string | null;
+	selection: SuburbSelection | null;
 	onClose: () => void;
 }) => {
-	if (!suburb) return null;
+	if (!selection) return null;
 	return (
 		<aside className="-translate-x-1/2 absolute bottom-4 left-1/2 z-10 w-[min(900px,calc(100vw-32px))] rounded-md bg-white/95 px-3 py-2 text-sm shadow-md backdrop-blur">
 			<header className="mb-1 flex items-center justify-between gap-2">
-				<h2 className="font-semibold text-neutral-900">{suburb}</h2>
+				<h2 className="font-semibold text-neutral-900">
+					{selection.name}
+					<span className="ml-1.5 font-normal text-neutral-500 text-xs">
+						SAL {selection.code}
+					</span>
+				</h2>
 				<button
 					type="button"
 					onClick={onClose}
@@ -33,7 +40,7 @@ export const SuburbPlotPanel = ({
 					</div>
 				}
 			>
-				<SuburbPlot suburb={suburb} />
+				<SuburbPlot salCode={selection.code} />
 			</Suspense>
 		</aside>
 	);
