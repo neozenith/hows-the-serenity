@@ -336,8 +336,7 @@ const App = () => {
 			<DeckGL initialViewState={INITIAL_VIEW_STATE} controller layers={layers}>
 				<BaseMap mapStyle={MAP_STYLE} />
 			</DeckGL>
-			<StatusPanel status={status} />
-			<LayerPanel visible={visible} onToggle={toggle} />
+			<ControlPanel status={status} visible={visible} onToggle={toggle} />
 		</div>
 	);
 };
@@ -348,63 +347,93 @@ const DOT_COLOR: Record<DbStatus["state"], string> = {
 	error: "#ff4444",
 };
 
-const StatusPanel = ({ status }: { status: DbStatus }) => (
-	<aside className="absolute top-4 left-4 z-10 max-w-xs rounded-md bg-white/95 px-4 py-3 text-sm shadow-md backdrop-blur">
-		<h1 className="mb-1 text-base font-semibold text-neutral-900">
-			How's the Serenity?
-		</h1>
-		<div className="mb-2 flex items-center gap-2 text-neutral-700">
-			<span
-				className="inline-block h-2 w-2 rounded-full"
-				style={{ background: DOT_COLOR[status.state] }}
-				aria-hidden="true"
-			/>
-			<span>{status.message}</span>
-		</div>
-		{status.state === "ready" && status.tables.length > 0 && (
-			<ul className="space-y-0.5 text-xs text-neutral-600">
-				{status.tables.map((t) => (
-					<li key={t.name}>
-						<code className="rounded bg-neutral-100 px-1 py-0.5">{t.name}</code>
-						{" · "}
-						{t.rows.toLocaleString()} rows
-					</li>
-				))}
-			</ul>
-		)}
-	</aside>
-);
-
-const LayerPanel = ({
+const ControlPanel = ({
+	status,
 	visible,
 	onToggle,
 }: {
+	status: DbStatus;
 	visible: LayerVisibility;
 	onToggle: (key: LayerKey) => void;
-}) => (
-	<aside className="absolute top-4 right-4 z-10 w-56 rounded-md bg-white/95 px-4 py-3 text-sm shadow-md backdrop-blur">
-		<h2 className="mb-2 text-sm font-semibold text-neutral-900">Layers</h2>
-		<ul className="space-y-1.5">
-			{LAYER_DEFS.map((layer) => (
-				<li key={layer.key}>
-					<label className="flex cursor-pointer items-center gap-2 text-neutral-700">
-						<input
-							type="checkbox"
-							className="h-3.5 w-3.5 cursor-pointer accent-neutral-700"
-							checked={visible[layer.key]}
-							onChange={() => onToggle(layer.key)}
-						/>
-						<span className="flex-1">
-							<span className="block text-neutral-900">{layer.label}</span>
-							<span className="block text-xs text-neutral-500">
-								{layer.hint}
-							</span>
-						</span>
-					</label>
-				</li>
-			))}
-		</ul>
-	</aside>
-);
+}) => {
+	const [collapsed, setCollapsed] = useState(false);
+	return (
+		<aside
+			className={`absolute top-4 left-4 z-10 ${
+				collapsed ? "w-auto" : "w-64"
+			} rounded-md bg-white/95 px-4 py-3 text-sm shadow-md backdrop-blur`}
+		>
+			<header className="flex items-center justify-between gap-2">
+				<div className="flex items-center gap-2">
+					<span
+						className="inline-block h-2 w-2 rounded-full"
+						style={{ background: DOT_COLOR[status.state] }}
+						aria-hidden="true"
+					/>
+					<h1 className="text-base font-semibold text-neutral-900">
+						How's the Serenity?
+					</h1>
+				</div>
+				<button
+					type="button"
+					onClick={() => setCollapsed((c) => !c)}
+					aria-expanded={!collapsed}
+					aria-label={collapsed ? "Show controls" : "Hide controls"}
+					className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+				>
+					<span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+				</button>
+			</header>
+			{!collapsed && (
+				<div className="mt-2 space-y-3">
+					<section>
+						<p className="text-neutral-700">{status.message}</p>
+						{status.state === "ready" && status.tables.length > 0 && (
+							<ul className="mt-1 space-y-0.5 text-xs text-neutral-600">
+								{status.tables.map((t) => (
+									<li key={t.name}>
+										<code className="rounded bg-neutral-100 px-1 py-0.5">
+											{t.name}
+										</code>
+										{" · "}
+										{t.rows.toLocaleString()} rows
+									</li>
+								))}
+							</ul>
+						)}
+					</section>
+					<hr className="border-neutral-200" />
+					<section>
+						<h2 className="mb-1.5 text-sm font-semibold text-neutral-900">
+							Layers
+						</h2>
+						<ul className="space-y-1.5">
+							{LAYER_DEFS.map((layer) => (
+								<li key={layer.key}>
+									<label className="flex cursor-pointer items-center gap-2 text-neutral-700">
+										<input
+											type="checkbox"
+											className="h-3.5 w-3.5 cursor-pointer accent-neutral-700"
+											checked={visible[layer.key]}
+											onChange={() => onToggle(layer.key)}
+										/>
+										<span className="flex-1">
+											<span className="block text-neutral-900">
+												{layer.label}
+											</span>
+											<span className="block text-xs text-neutral-500">
+												{layer.hint}
+											</span>
+										</span>
+									</label>
+								</li>
+							))}
+						</ul>
+					</section>
+				</div>
+			)}
+		</aside>
+	);
+};
 
 export default App;

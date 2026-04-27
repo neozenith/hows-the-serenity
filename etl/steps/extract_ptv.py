@@ -69,16 +69,12 @@ def run(
     if drop_rail_replacement:
         if "SHORT_NAME" in gdf.columns:
             before = len(gdf)
-            gdf = gdf[
-                ~gdf["SHORT_NAME"].astype(str).str.contains(_RAIL_REPLACEMENT_LINE_PATTERN)
-            ]
+            gdf = gdf[~gdf["SHORT_NAME"].astype(str).str.contains(_RAIL_REPLACEMENT_LINE_PATTERN)]
             if before != len(gdf):
                 log.info("Dropped %d rail-replacement-bus lines", before - len(gdf))
         if "STOP_NAME" in gdf.columns:
             before = len(gdf)
-            gdf = gdf[
-                ~gdf["STOP_NAME"].astype(str).str.contains(_RAIL_REPLACEMENT_STOP_PATTERN)
-            ]
+            gdf = gdf[~gdf["STOP_NAME"].astype(str).str.contains(_RAIL_REPLACEMENT_STOP_PATTERN)]
             if before != len(gdf):
                 log.info("Dropped %d rail-replacement-bus stops", before - len(gdf))
 
