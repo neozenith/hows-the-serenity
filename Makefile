@@ -5,7 +5,7 @@
 .PHONY: typecheck typecheck-ts typecheck-py
 .PHONY: test test-ts test-py test-watch test-ui test-e2e test-e2e-ui
 .PHONY: fix ci
-.PHONY: etl-extract etl-publish etl-tile etl-status data
+.PHONY: etl-extract etl-extract-iso etl-publish etl-tile etl-tile-iso etl-status data
 .PHONY: port-debug port-clean agentic-port-clean
 
 # =============================================================================
@@ -145,9 +145,17 @@ ci: audit build format-check typecheck lint test test-e2e ## Full CI gate (mirro
 # steps without re-extracting if only the publish/tile code changed.
 
 ETL_RUN := uv run -m etl
+
+# SAL (suburb boundaries)
 SAL_ZIP := data/originals/boundaries/SAL_2021_AUST_GDA2020_SHP.zip
 SAL_PARQUET := data/converted/sal_2021_aust_gda2020.parquet
 SAL_TILES_DIR := public/data/tiles/suburbs
+
+# Foot isochrones (walkability corridors)
+ISO_FOOT_DIR := data/originals/isochrones/foot
+ISO_FOOT_PARQUET := data/converted/isochrones_foot.parquet
+ISO_FOOT_5_TILES_DIR := public/data/tiles/iso_foot_5
+ISO_FOOT_15_TILES_DIR := public/data/tiles/iso_foot_15
 
 etl-extract: $(SAL_PARQUET) ## Extract SAL zip -> GeoParquet intermediate
 $(SAL_PARQUET): $(SAL_ZIP) | install-py
@@ -157,13 +165,23 @@ etl-tile: $(SAL_TILES_DIR) ## Tile SAL parquet -> MVT XYZ tile tree
 $(SAL_TILES_DIR): $(SAL_PARQUET) | install-py
 	$(ETL_RUN) tile sal --input $<
 
+etl-extract-iso: $(ISO_FOOT_PARQUET) ## Concat + dissolve foot isochrones -> GeoParquet
+$(ISO_FOOT_PARQUET): | install-py
+	$(ETL_RUN) extract isochrones --input $(ISO_FOOT_DIR) --output $@
+
+etl-tile-iso: $(ISO_FOOT_5_TILES_DIR) $(ISO_FOOT_15_TILES_DIR) ## Tile foot isochrone corridors (5min + 15min)
+$(ISO_FOOT_5_TILES_DIR): $(ISO_FOOT_PARQUET) | install-py
+	$(ETL_RUN) tile isochrone --duration 5
+$(ISO_FOOT_15_TILES_DIR): $(ISO_FOOT_PARQUET) | install-py
+	$(ETL_RUN) tile isochrone --duration 15
+
 etl-publish: install-py ## Publish full SAL parquet -> single GeoJSON (legacy / reference)
 	$(ETL_RUN) publish sal
 
 etl-status: install-py ## Show pipeline artifact status
 	$(ETL_RUN) status
 
-data: etl-extract etl-tile ## Build all geospatial outputs (extract + tile)
+data: etl-extract etl-tile etl-extract-iso etl-tile-iso ## Build all geospatial outputs
 
 # =============================================================================
 # Port Management

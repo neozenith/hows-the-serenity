@@ -3,14 +3,19 @@ import { useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import { initRentalDb, type TableCount } from "@/lib/duckdb";
 
-// MVT tile tree built by the Python ETL: `etl tile sal`. Layout matches the
-// XYZ scheme MVTLayer expects via URL-template substitution.
+// MVT tile trees built by the Python ETL — `etl tile sal` and `etl tile isochrone`.
+// Layout matches the XYZ scheme MVTLayer expects via URL-template substitution.
 const SAL_TILES_URL = `${import.meta.env.BASE_URL}data/tiles/suburbs/{z}/{x}/{y}.pbf`;
-// Source data ranges (matches --min-zoom / --max-zoom passed to the tiler).
+const ISO_FOOT_5_TILES_URL = `${import.meta.env.BASE_URL}data/tiles/iso_foot_5/{z}/{x}/{y}.pbf`;
+const ISO_FOOT_15_TILES_URL = `${import.meta.env.BASE_URL}data/tiles/iso_foot_15/{z}/{x}/{y}.pbf`;
+
+// Source data ranges (mirror the --min-zoom / --max-zoom passed to each tiler).
 // MVTLayer auto-overzooms beyond max — Deck.GL stretches the deepest available
-// tile rather than 404'ing on z>11.
+// tile rather than 404'ing on z > maxZoom.
 const SAL_TILE_MIN_ZOOM = 6;
 const SAL_TILE_MAX_ZOOM = 9;
+const ISO_TILE_MIN_ZOOM = 9;
+const ISO_TILE_MAX_ZOOM = 12;
 
 // CartoDB's dark-matter style is a free, no-auth MapLibre style. Matches the
 // aesthetic of the predecessor VanillaJS site (see docs/context/history.md).
@@ -60,6 +65,9 @@ const App = () => {
 			});
 	}, []);
 
+	// Layer order matters — first in array is drawn first (under). Suburb
+	// boundaries on the bottom; 15-min corridor as the wider catchment;
+	// 5-min corridor on top as the "right next to PT" highlight.
 	const layers = [
 		new MVTLayer({
 			id: "suburbs-sal",
@@ -73,6 +81,26 @@ const App = () => {
 			getLineColor: [200, 200, 50, 180],
 			getLineWidth: 2,
 			lineWidthMinPixels: 1,
+		}),
+		new MVTLayer({
+			id: "iso-foot-15",
+			data: ISO_FOOT_15_TILES_URL,
+			minZoom: ISO_TILE_MIN_ZOOM,
+			maxZoom: ISO_TILE_MAX_ZOOM,
+			stroked: false,
+			filled: true,
+			pickable: false,
+			getFillColor: [80, 180, 220, 50],
+		}),
+		new MVTLayer({
+			id: "iso-foot-5",
+			data: ISO_FOOT_5_TILES_URL,
+			minZoom: ISO_TILE_MIN_ZOOM,
+			maxZoom: ISO_TILE_MAX_ZOOM,
+			stroked: false,
+			filled: true,
+			pickable: false,
+			getFillColor: [255, 165, 70, 90],
 		}),
 	];
 

@@ -17,11 +17,13 @@ from pathlib import Path
 from etl.config import (
     BOUNDARIES_ORIGINALS,
     CONVERTED_DIR,
+    ISOCHRONE_DURATIONS,
+    ISOCHRONES_ORIGINALS,
     PUBLIC_DATA_DIR,
     SAL_SIMPLIFY_TOLERANCE,
 )
 from etl.logging_setup import configure
-from etl.steps import extract_sal, publish_sal, tile_sal
+from etl.steps import extract_isochrones, extract_sal, publish_sal, tile_isochrone, tile_sal
 
 # ---- Default file paths (single source of truth for CLI defaults) -----------
 
@@ -30,6 +32,9 @@ SAL_PARQUET = CONVERTED_DIR / "sal_2021_aust_gda2020.parquet"
 SAL_GEOJSON = PUBLIC_DATA_DIR / "selected_sal_2021_aust_gda2020.geojson"
 TILES_DIR = PUBLIC_DATA_DIR / "tiles"
 SAL_TILES_DIR = TILES_DIR / "suburbs"
+
+ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
+ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
 
 
 # ---- Subcommand handlers ----------------------------------------------------
@@ -57,12 +62,38 @@ def cmd_tile_sal(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_extract_isochrones(args: argparse.Namespace) -> None:
+    extract_isochrones.run(
+        input_dir=args.input,
+        output_parquet=args.output,
+        durations=tuple(args.durations),
+        mode=args.mode,
+    )
+
+
+def cmd_tile_isochrone(args: argparse.Namespace) -> None:
+    tile_isochrone.run(
+        input_parquet=args.input,
+        duration=args.duration,
+        output_dir=args.output,
+        mode=args.mode,
+        min_zoom=args.min_zoom,
+        max_zoom=args.max_zoom,
+    )
+
+
 def cmd_status(_: argparse.Namespace) -> None:
     rows: list[tuple[str, Path, str]] = [
         ("SAL zip (input)", SAL_ZIP, "file"),
         ("SAL parquet (intermediate)", SAL_PARQUET, "file"),
         ("SAL geojson (published)", SAL_GEOJSON, "file"),
         ("SAL MVT tiles", SAL_TILES_DIR, "dir"),
+        ("Isochrones source dir", ISO_FOOT_DIR, "dir"),
+        ("Isochrones parquet", ISO_FOOT_PARQUET, "file"),
+        *[
+            (f"Iso foot {d}min MVT tiles", TILES_DIR / f"iso_foot_{d}", "dir")
+            for d in ISOCHRONE_DURATIONS
+        ],
     ]
     print(f"{'Artifact':<30}  {'Exists':<7}  {'Size':>10}  Path")
     print("-" * 100)
@@ -110,6 +141,27 @@ def build_parser() -> argparse.ArgumentParser:
     sal_extract.add_argument("--output", type=Path, default=SAL_PARQUET, help="Output parquet")
     sal_extract.set_defaults(func=cmd_extract_sal)
 
+    iso_extract = extract_sub.add_parser(
+        "isochrones",
+        help="Concat + dissolve per-stop walking isochrones into corridor parquet",
+    )
+    iso_extract.add_argument(
+        "--input",
+        type=Path,
+        default=ISO_FOOT_DIR,
+        help="Directory of per-stop *.geojson files",
+    )
+    iso_extract.add_argument("--output", type=Path, default=ISO_FOOT_PARQUET, help="Output parquet")
+    iso_extract.add_argument(
+        "--durations",
+        type=int,
+        nargs="+",
+        default=list(ISOCHRONE_DURATIONS),
+        help="Contour durations to keep (minutes)",
+    )
+    iso_extract.add_argument("--mode", default="foot", help="Travel mode label")
+    iso_extract.set_defaults(func=cmd_extract_isochrones)
+
     # `etl publish <source>`
     publish_p = top_sub.add_parser("publish", help="Publish intermediate to public/data GeoJSON")
     publish_p.set_defaults(func=_help(publish_p))
@@ -147,6 +199,25 @@ def build_parser() -> argparse.ArgumentParser:
     sal_tile.add_argument("--min-zoom", type=int, default=6, help="Minimum zoom level")
     sal_tile.add_argument("--max-zoom", type=int, default=11, help="Maximum zoom level")
     sal_tile.set_defaults(func=cmd_tile_sal)
+
+    iso_tile = tile_sub.add_parser(
+        "isochrone",
+        help="Tile one dissolved-isochrone duration into MVT XYZ tiles",
+    )
+    iso_tile.add_argument("--input", type=Path, default=ISO_FOOT_PARQUET, help="Source parquet")
+    iso_tile.add_argument(
+        "--output",
+        type=Path,
+        default=TILES_DIR,
+        help="Tile root; layer dir iso_<mode>_<duration> is appended",
+    )
+    iso_tile.add_argument(
+        "--duration", type=int, required=True, help="Contour to tile (e.g. 5 or 15)"
+    )
+    iso_tile.add_argument("--mode", default="foot", help="Travel mode (used in dir name)")
+    iso_tile.add_argument("--min-zoom", type=int, default=9, help="Minimum zoom level")
+    iso_tile.add_argument("--max-zoom", type=int, default=12, help="Maximum zoom level")
+    iso_tile.set_defaults(func=cmd_tile_isochrone)
 
     # `etl status`
     status_p = top_sub.add_parser("status", help="Show current state of pipeline artifacts")

@@ -19,6 +19,20 @@ log = logging.getLogger("etl.tiling.encode")
 MVT_EXTENT = 4096
 
 
+def encode_empty_tile(layer_name: str) -> bytes:
+    """Return a minimal valid MVT for a tile with zero features in the layer.
+
+    Used as a stub for tile coordinates the layer is asked for but has no data
+    in. Writing an 18-byte stub instead of skipping prevents 404s on the
+    consumer side — the browser logs every 404 to the console regardless of
+    JS-side handling, which fails our zero-console-errors e2e gate.
+    """
+    encoded: bytes = mvt.encode(
+        [{"name": layer_name, "features": []}], default_options={"extents": MVT_EXTENT}
+    )
+    return encoded
+
+
 def encode_tile(
     *,
     gdf_3857: gpd.GeoDataFrame,
@@ -29,7 +43,8 @@ def encode_tile(
     """Encode the features of `gdf_3857` that intersect `tile` as MVT bytes.
 
     `gdf_3857` must already be in EPSG:3857. Returns None if the tile contains
-    no features (caller skips writing — saves disk + git churn).
+    no features (caller decides whether to skip writing or stub with
+    `encode_empty_tile`).
     """
     tile_bbox = box(tile.minx, tile.miny, tile.maxx, tile.maxy)
 

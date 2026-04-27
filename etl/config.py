@@ -29,6 +29,21 @@ GEOJSON_COORD_PRECISION = 6
 # Properties to retain on SAL features (per user spec — drop AREASQKM).
 SAL_KEEP_PROPERTIES = ("SAL_CODE21", "SAL_NAME21", "STE_CODE21", "STE_NAME21")
 
+# Walking-isochrone source: per-stop GeoJSONs from the upstream isochrones
+# project. Each file contains 5/10/15-min contours as separate features.
+ISOCHRONES_ORIGINALS = ORIGINALS_DIR / "isochrones"
+
+# Durations we publish as walkability corridors. 10-min is intentionally
+# omitted — the user's mental model is "right next to PT" (5) vs. "fine to
+# walk to PT" (15); the in-between adds noise without insight.
+ISOCHRONE_DURATIONS = (5, 15)
+
+# Properties retained on dissolved isochrone features. The pre-dissolve
+# per-stop attributes (STOP_ID, STOP_NAME, source_file, ...) are dropped
+# because they're misleading after the union — they describe one arbitrary
+# stop within the corridor, not the corridor itself.
+ISOCHRONE_KEEP_PROPERTIES = ("minutes", "isochrone_mode")
+
 # Default Douglas-Peucker tolerance (in EPSG:4326 degrees) for the published
 # single-file GeoJSON. ~0.0001° ≈ 11 m at the equator — invisible at suburb
 # zoom levels (9-13). Set to 0 to disable simplification.
