@@ -21,7 +21,7 @@ def run(
     layer_name: str = "suburbs",
     layer_dir: str | None = None,
     min_zoom: int = 6,
-    max_zoom: int = 11,
+    max_zoom: int = 9,
     clean: bool = True,
 ) -> TilingResult:
     log.info("Reading GeoParquet <- %s", input_parquet)

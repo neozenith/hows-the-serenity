@@ -16,6 +16,7 @@ Each .pbf is a gzipped Mapbox Vector Tile protobuf. Generation pipeline:
 
 from etl.tiling.coords import tiles_covering_bbox
 from etl.tiling.encode import encode_tile
+from etl.tiling.manifest import write_manifest
 from etl.tiling.writer import write_tile
 
-__all__ = ["encode_tile", "tiles_covering_bbox", "write_tile"]
+__all__ = ["encode_tile", "tiles_covering_bbox", "write_manifest", "write_tile"]

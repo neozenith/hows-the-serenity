@@ -20,6 +20,8 @@
 		"@deck.gl/react": "^9.3.1",
 		"@duckdb/duckdb-wasm": "^1.33.1-dev45.0",
 		"@fontsource-variable/geist": "^5.2.8",
+		"@loaders.gl/core": "^4.4.1",
+		"@loaders.gl/mvt": "^4.4.1",
 		"@tailwindcss/vite": "^4.2.4",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",

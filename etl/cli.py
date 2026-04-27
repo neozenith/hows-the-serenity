@@ -197,7 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="MVT layer name (and on-disk subdirectory)",
     )
     sal_tile.add_argument("--min-zoom", type=int, default=6, help="Minimum zoom level")
-    sal_tile.add_argument("--max-zoom", type=int, default=11, help="Maximum zoom level")
+    sal_tile.add_argument("--max-zoom", type=int, default=9, help="Maximum zoom level")
     sal_tile.set_defaults(func=cmd_tile_sal)
 
     iso_tile = tile_sub.add_parser(
