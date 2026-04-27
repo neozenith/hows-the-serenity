@@ -128,6 +128,9 @@ def cmd_extract_ptv_stops(args: argparse.Namespace) -> None:
         output_parquet=_ptv_stops_parquet(args.mode),
         keep_properties=PTV_STOP_KEEP_PROPERTIES,
         mode_filter=PTV_MODE_LABELS[args.mode],
+        # Matches upstream `utils.py:86-90` — collapses multi-platform
+        # interchanges into one row per logical station name.
+        dedupe_by="STOP_NAME",
     )
 
 
