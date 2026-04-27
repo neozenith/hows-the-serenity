@@ -41,7 +41,9 @@ type LayerKey =
 	| "trainLines"
 	| "trainStops"
 	| "tramLines"
-	| "tramStops";
+	| "tramStops"
+	| "regionalTrainLines"
+	| "regionalTrainStops";
 
 type LayerVisibility = Record<LayerKey, boolean>;
 
@@ -55,6 +57,8 @@ const LAYER_DIRS: Record<LayerKey, string> = {
 	trainStops: "ptv_stops_metro_train",
 	tramLines: "ptv_lines_metro_tram",
 	tramStops: "ptv_stops_metro_tram",
+	regionalTrainLines: "ptv_lines_regional_train",
+	regionalTrainStops: "ptv_stops_regional_train",
 };
 
 const LAYER_DEFS: ReadonlyArray<{
@@ -69,12 +73,23 @@ const LAYER_DEFS: ReadonlyArray<{
 	{ key: "trainStops", label: "Train stops", hint: "PTV · METRO TRAIN" },
 	{ key: "tramLines", label: "Tram lines", hint: "PTV · METRO TRAM" },
 	{ key: "tramStops", label: "Tram stops", hint: "PTV · METRO TRAM" },
+	{
+		key: "regionalTrainLines",
+		label: "Regional train lines",
+		hint: "PTV · REGIONAL TRAIN",
+	},
+	{
+		key: "regionalTrainStops",
+		label: "Regional train stops",
+		hint: "PTV · REGIONAL TRAIN",
+	},
 ];
 
 // Brand-ish colors picked to be distinguishable from the warm iso layers
 // and the yellow SAL boundaries while still reading as transit-y.
-const TRAIN_COLOR: [number, number, number] = [255, 140, 0]; // orange
-const TRAM_COLOR: [number, number, number] = [220, 60, 220]; // magenta
+const TRAIN_COLOR: [number, number, number] = [255, 140, 0]; // orange — metro train
+const TRAM_COLOR: [number, number, number] = [220, 60, 220]; // magenta — tram
+const REGIONAL_TRAIN_COLOR: [number, number, number] = [80, 220, 130]; // green — V/Line
 
 const App = () => {
 	const [status, setStatus] = useState<DbStatus>({
@@ -89,6 +104,8 @@ const App = () => {
 		trainStops: null,
 		tramLines: null,
 		tramStops: null,
+		regionalTrainLines: null,
+		regionalTrainStops: null,
 	});
 	const [visible, setVisible] = useState<LayerVisibility>({
 		suburbs: true,
@@ -98,6 +115,8 @@ const App = () => {
 		trainStops: true,
 		tramLines: true,
 		tramStops: true,
+		regionalTrainLines: true,
+		regionalTrainStops: true,
 	});
 
 	// React 19 StrictMode double-invokes effects in dev. Guard so we don't
@@ -263,6 +282,43 @@ const App = () => {
 				getLineWidth: 0.75,
 				lineWidthMinPixels: 0.75,
 				fetch: makeGatedTileFetch(manifests.tramStops),
+			}),
+		manifests.regionalTrainLines &&
+			new MVTLayer({
+				id: "ptv-lines-regional-train",
+				data: tileUrl(LAYER_DIRS.regionalTrainLines),
+				minZoom: manifests.regionalTrainLines.manifest.minZoom,
+				maxZoom: manifests.regionalTrainLines.manifest.maxZoom,
+				extent: manifests.regionalTrainLines.manifest.bounds,
+				visible: visible.regionalTrainLines,
+				stroked: true,
+				filled: false,
+				pickable: false,
+				getLineColor: [...REGIONAL_TRAIN_COLOR, 220],
+				getLineWidth: 2,
+				lineWidthMinPixels: 1.5,
+				fetch: makeGatedTileFetch(manifests.regionalTrainLines),
+			}),
+		manifests.regionalTrainStops &&
+			new MVTLayer({
+				id: "ptv-stops-regional-train",
+				data: tileUrl(LAYER_DIRS.regionalTrainStops),
+				minZoom: manifests.regionalTrainStops.manifest.minZoom,
+				maxZoom: manifests.regionalTrainStops.manifest.maxZoom,
+				extent: manifests.regionalTrainStops.manifest.bounds,
+				visible: visible.regionalTrainStops,
+				pickable: true,
+				pointType: "circle",
+				pointRadiusUnits: "pixels",
+				getPointRadius: 4.5,
+				pointRadiusMinPixels: 3,
+				stroked: true,
+				filled: true,
+				getFillColor: [...REGIONAL_TRAIN_COLOR, 230],
+				getLineColor: [20, 20, 20, 220],
+				getLineWidth: 1,
+				lineWidthMinPixels: 1,
+				fetch: makeGatedTileFetch(manifests.regionalTrainStops),
 			}),
 	].filter(Boolean);
 

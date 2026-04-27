@@ -22,13 +22,33 @@ def run(
     input_geojson: Path,
     output_parquet: Path,
     keep_properties: Iterable[str],
+    mode_filter: str | None = None,
 ) -> int:
+    """Extract a pruned + optionally MODE-filtered parquet from a PTV GeoJSON.
+
+    `mode_filter` matches against the source's `MODE` column verbatim
+    (e.g. "METRO TRAIN", "REGIONAL TRAIN"). Pass None to keep all rows.
+    """
     if not input_geojson.exists():
         raise FileNotFoundError(f"PTV source not found: {input_geojson}")
 
     log.info("Reading %s", input_geojson)
     gdf = gpd.read_file(input_geojson)
     log.info("Loaded %d features (CRS: %s)", len(gdf), gdf.crs)
+
+    if mode_filter is not None:
+        if "MODE" not in gdf.columns:
+            raise ValueError(
+                f"mode_filter={mode_filter!r} requested but no MODE column on input"
+            )
+        before = len(gdf)
+        gdf = gdf[gdf["MODE"] == mode_filter]
+        log.info("Filtered MODE==%r: %d -> %d features", mode_filter, before, len(gdf))
+        if gdf.empty:
+            available = sorted(set(gpd.read_file(input_geojson)["MODE"].dropna().unique()))
+            raise ValueError(
+                f"No features for MODE={mode_filter!r}. Available: {available}"
+            )
 
     keep = list(keep_properties)
     missing = [p for p in keep if p not in gdf.columns]

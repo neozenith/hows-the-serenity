@@ -20,9 +20,12 @@ from etl.config import (
     ISOCHRONE_DURATIONS,
     ISOCHRONES_ORIGINALS,
     PTV_LINE_KEEP_PROPERTIES,
+    PTV_LINES_GEOJSON,
+    PTV_MODE_LABELS,
     PTV_MODES,
     PTV_ORIGINALS,
     PTV_STOP_KEEP_PROPERTIES,
+    PTV_STOPS_GEOJSON,
     PUBLIC_DATA_DIR,
     SAL_SIMPLIFY_TOLERANCE,
 )
@@ -47,14 +50,6 @@ SAL_TILES_DIR = TILES_DIR / "suburbs"
 
 ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
 ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
-
-
-def _ptv_lines_source(mode: str) -> Path:
-    return PTV_ORIGINALS / f"lines_within_union_{mode}.geojson"
-
-
-def _ptv_stops_source(mode: str) -> Path:
-    return PTV_ORIGINALS / f"stops_with_commute_times_{mode}.geojson"
 
 
 def _ptv_lines_parquet(mode: str) -> Path:
@@ -120,17 +115,19 @@ def cmd_tile_isochrone(args: argparse.Namespace) -> None:
 
 def cmd_extract_ptv_lines(args: argparse.Namespace) -> None:
     extract_ptv.run(
-        input_geojson=_ptv_lines_source(args.mode),
+        input_geojson=PTV_LINES_GEOJSON,
         output_parquet=_ptv_lines_parquet(args.mode),
         keep_properties=PTV_LINE_KEEP_PROPERTIES,
+        mode_filter=PTV_MODE_LABELS[args.mode],
     )
 
 
 def cmd_extract_ptv_stops(args: argparse.Namespace) -> None:
     extract_ptv.run(
-        input_geojson=_ptv_stops_source(args.mode),
+        input_geojson=PTV_STOPS_GEOJSON,
         output_parquet=_ptv_stops_parquet(args.mode),
         keep_properties=PTV_STOP_KEEP_PROPERTIES,
+        mode_filter=PTV_MODE_LABELS[args.mode],
     )
 
 

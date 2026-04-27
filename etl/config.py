@@ -45,23 +45,29 @@ ISOCHRONE_DURATIONS = (5, 15)
 ISOCHRONE_KEEP_PROPERTIES = ("minutes", "isochrone_mode")
 
 # PTV (Public Transport Victoria) lines + stops, sourced from the upstream
-# isochrones project. Lines are per-route LineStrings; stops are per-stop
-# Points enriched with commute-time-to-CBD tiering.
+# isochrones project's full unrestricted snapshots — one combined GeoJSON
+# per geometry type, filtered at extract time by the `MODE` column.
 PTV_ORIGINALS = ORIGINALS_DIR / "ptv"
-PTV_MODES = ("metro_train", "metro_tram")
+PTV_LINES_GEOJSON = PTV_ORIGINALS / "public_transport_lines.geojson"
+PTV_STOPS_GEOJSON = PTV_ORIGINALS / "public_transport_stops.geojson"
+
+# Slug -> upstream MODE column value. Slug is what we use in tile dirs and
+# the CLI; the MODE value is what's stored in the source GeoJSON properties.
+PTV_MODE_LABELS: dict[str, str] = {
+    "metro_train": "METRO TRAIN",
+    "metro_tram": "METRO TRAM",
+    "regional_train": "REGIONAL TRAIN",
+}
+PTV_MODES = tuple(PTV_MODE_LABELS.keys())
 
 # Lines: HEADSIGN repeats LONG_NAME, SHAPE_ID is internal — drop both.
 PTV_LINE_KEEP_PROPERTIES = ("SHORT_NAME", "LONG_NAME", "MODE")
 
-# Stops: keep the nearest commute-tier (5/10/15/20+ min to Southern Cross)
-# for future color-coding; drop raw distance + raw minutes since the tier
-# is the rendering primitive we'll actually use.
-PTV_STOP_KEEP_PROPERTIES = (
-    "STOP_ID",
-    "STOP_NAME",
-    "MODE",
-    "transit_time_minutes_nearest_tier",
-)
+# Stops: just the identifying triplet. The earlier
+# `transit_time_minutes_nearest_tier` came from a filtered subset and is not
+# present in the unrestricted source — recompute later from a full
+# stop-table if commute-tier coloring is wanted.
+PTV_STOP_KEEP_PROPERTIES = ("STOP_ID", "STOP_NAME", "MODE")
 
 # Default Douglas-Peucker tolerance (in EPSG:4326 degrees) for the published
 # single-file GeoJSON. ~0.0001° ≈ 11 m at the equator — invisible at suburb
