@@ -19,6 +19,7 @@ from etl.config import (
     CONVERTED_DIR,
     ISOCHRONE_DURATIONS,
     ISOCHRONES_ORIGINALS,
+    PTV_COMMUTE_HULL_KEEP_PROPERTIES,
     PTV_LINE_KEEP_PROPERTIES,
     PTV_LINES_GEOJSON,
     PTV_MODE_LABELS,
@@ -34,6 +35,7 @@ from etl.steps import (
     extract_isochrones,
     extract_ptv,
     extract_sal,
+    publish_commute_hulls,
     publish_sal,
     tile_isochrone,
     tile_ptv,
@@ -66,6 +68,14 @@ def _ptv_lines_tiles_dir(mode: str) -> Path:
 
 def _ptv_stops_tiles_dir(mode: str) -> Path:
     return PUBLIC_DATA_DIR / "tiles" / f"ptv_stops_{mode}"
+
+
+def _commute_hulls_source(mode: str) -> Path:
+    return PTV_ORIGINALS / f"ptv_commute_tier_hulls_{mode}.geojson"
+
+
+def _commute_hulls_published(mode: str) -> Path:
+    return PUBLIC_DATA_DIR / f"commute_hulls_{mode}.geojson"
 
 
 # ---- Subcommand handlers ----------------------------------------------------
@@ -160,6 +170,14 @@ def cmd_tile_ptv_stops(args: argparse.Namespace) -> None:
         layer_name="ptv_stops",
         layer_dir=f"ptv_stops_{args.mode}",
         keep_properties=PTV_STOP_KEEP_PROPERTIES,
+    )
+
+
+def cmd_publish_commute_hulls(args: argparse.Namespace) -> None:
+    publish_commute_hulls.run(
+        input_geojson=_commute_hulls_source(args.mode),
+        output_geojson=_commute_hulls_published(args.mode),
+        keep_properties=PTV_COMMUTE_HULL_KEEP_PROPERTIES,
     )
 
 
@@ -284,6 +302,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Douglas-Peucker tolerance in degrees (0 = no simplification)",
     )
     sal_publish.set_defaults(func=cmd_publish_sal)
+
+    hulls_publish = publish_sub.add_parser(
+        "commute-hulls",
+        help="Publish PTV commute-tier hulls (4 polygons per mode) as static GeoJSON",
+    )
+    hulls_publish.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
+    hulls_publish.set_defaults(func=cmd_publish_commute_hulls)
 
     # `etl tile <source>`
     tile_p = top_sub.add_parser("tile", help="Tile intermediate Parquet to MVT XYZ tiles")

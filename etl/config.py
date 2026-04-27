@@ -69,6 +69,11 @@ PTV_LINE_KEEP_PROPERTIES = ("SHORT_NAME", "LONG_NAME", "MODE")
 # stop-table if commute-tier coloring is wanted.
 PTV_STOP_KEEP_PROPERTIES = ("STOP_ID", "STOP_NAME", "MODE")
 
+# Commute-tier hulls: pre-computed concentric polygons radiating from
+# Southern Cross at 15/30/45/60-minute commute-time bands. 4 polygons per
+# mode, ~3 KB total — too small for MVT tiling, served as static GeoJSON.
+PTV_COMMUTE_HULL_KEEP_PROPERTIES = ("MODE", "transit_time_minutes_nearest_tier")
+
 # Default Douglas-Peucker tolerance (in EPSG:4326 degrees) for the published
 # single-file GeoJSON. ~0.0001° ≈ 11 m at the equator — invisible at suburb
 # zoom levels (9-13). Set to 0 to disable simplification.

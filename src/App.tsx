@@ -1,4 +1,4 @@
-import { DeckGL, type MapViewState, MVTLayer } from "deck.gl";
+import { DeckGL, GeoJsonLayer, type MapViewState, MVTLayer } from "deck.gl";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
@@ -42,6 +42,12 @@ const tileUrl = (dir: string, version?: number) => {
 };
 const manifestUrl = (dir: string) => `${TILES_BASE}/${dir}/manifest.json`;
 
+// Static GeoJSON layers — small enough (a few KB) that MVT tiling is overhead
+// rather than help. Loaded directly via Deck.GL's GeoJsonLayer.
+const STATIC_DATA_BASE = `${import.meta.env.BASE_URL}data`;
+const COMMUTE_HULLS_TRAIN_URL = `${STATIC_DATA_BASE}/commute_hulls_metro_train.geojson`;
+const COMMUTE_HULLS_TRAM_URL = `${STATIC_DATA_BASE}/commute_hulls_metro_tram.geojson`;
+
 // CartoDB's dark-matter style is a free, no-auth MapLibre style. Matches the
 // aesthetic of the predecessor VanillaJS site (see docs/context/history.md).
 const MAP_STYLE =
@@ -60,7 +66,8 @@ type DbStatus =
 	| { state: "ready"; message: string; tables: TableCount[] }
 	| { state: "error"; message: string };
 
-type LayerKey =
+// Layers backed by MVT tile trees (have manifests, gated fetch, etc.)
+type TileLayerKey =
 	| "suburbs"
 	| "iso5"
 	| "iso15"
@@ -71,11 +78,17 @@ type LayerKey =
 	| "regionalTrainLines"
 	| "regionalTrainStops";
 
+// Static-GeoJSON layers — too small to be worth tiling.
+type StaticLayerKey = "commuteTrain" | "commuteTram";
+
+type LayerKey = TileLayerKey | StaticLayerKey;
+
 type LayerVisibility = Record<LayerKey, boolean>;
 
-type Manifests = Record<LayerKey, LoadedManifest | null>;
+// Manifests live for tile layers only.
+type Manifests = Record<TileLayerKey, LoadedManifest | null>;
 
-const LAYER_DIRS: Record<LayerKey, string> = {
+const LAYER_DIRS: Record<TileLayerKey, string> = {
 	suburbs: "suburbs",
 	iso15: "iso_foot_15",
 	iso5: "iso_foot_5",
@@ -86,6 +99,7 @@ const LAYER_DIRS: Record<LayerKey, string> = {
 	regionalTrainLines: "ptv_lines_regional_train",
 	regionalTrainStops: "ptv_stops_regional_train",
 };
+const TILE_LAYER_KEYS = Object.keys(LAYER_DIRS) as TileLayerKey[];
 
 const LAYER_DEFS: ReadonlyArray<{
 	key: LayerKey;
@@ -109,13 +123,64 @@ const LAYER_DEFS: ReadonlyArray<{
 		label: "Regional train stops",
 		hint: "PTV · REGIONAL TRAIN",
 	},
+	{
+		key: "commuteTrain",
+		label: "Train commute hulls",
+		hint: "15/30/45/60-min from Southern Cross",
+	},
+	{
+		key: "commuteTram",
+		label: "Tram commute hulls",
+		hint: "15/30/45/60-min from Southern Cross",
+	},
 ];
+
+// Hover tooltip — DeckGL invokes this for any pickable layer's hovered
+// feature, handles positioning automatically. Returning null hides the
+// tooltip; an object surfaces text+style. We branch on which property
+// shape was picked because the layers (PTV stops vs SAL suburbs) carry
+// different fields.
+const pickToTooltip = (info: {
+	object?: { properties?: Record<string, unknown> } | null;
+}): { text: string } | null => {
+	const props = info.object?.properties;
+	if (!props) return null;
+	if (typeof props.STOP_NAME === "string") {
+		const mode = typeof props.MODE === "string" ? props.MODE : "";
+		return { text: mode ? `${props.STOP_NAME}\n${mode}` : props.STOP_NAME };
+	}
+	if (typeof props.SAL_NAME21 === "string") {
+		const ste = typeof props.STE_NAME21 === "string" ? props.STE_NAME21 : "";
+		return { text: ste ? `${props.SAL_NAME21}\n${ste}` : props.SAL_NAME21 };
+	}
+	return null;
+};
 
 // Brand-ish colors picked to be distinguishable from the warm iso layers
 // and the yellow SAL boundaries while still reading as transit-y.
 const TRAIN_COLOR: [number, number, number] = [255, 140, 0]; // orange — metro train
 const TRAM_COLOR: [number, number, number] = [220, 60, 220]; // magenta — tram
 const REGIONAL_TRAIN_COLOR: [number, number, number] = [80, 220, 130]; // green — V/Line
+
+// Commute-tier hull opacity per band — closer-to-CBD = more opaque.
+// `undefined` falls back to the smallest opacity. Tiers are 15/30/45/60 min.
+const COMMUTE_TIER_ALPHA: Record<number, number> = {
+	15: 70,
+	30: 50,
+	45: 32,
+	60: 18,
+};
+const commuteFillColor =
+	(base: [number, number, number]) =>
+	(f: { properties?: { transit_time_minutes_nearest_tier?: number } }) => {
+		const tier = f.properties?.transit_time_minutes_nearest_tier ?? 60;
+		return [...base, COMMUTE_TIER_ALPHA[tier] ?? 18] as [
+			number,
+			number,
+			number,
+			number,
+		];
+	};
 
 const App = () => {
 	const [status, setStatus] = useState<DbStatus>({
@@ -143,6 +208,8 @@ const App = () => {
 		tramStops: true,
 		regionalTrainLines: true,
 		regionalTrainStops: true,
+		commuteTrain: false,
+		commuteTram: false,
 	});
 
 	// React 19 StrictMode double-invokes effects in dev. Guard so we don't
@@ -178,11 +245,12 @@ const App = () => {
 				console.error("DuckDB init failed:", err);
 			});
 
-		const keys = Object.keys(LAYER_DIRS) as LayerKey[];
-		Promise.all(keys.map((k) => loadManifest(manifestUrl(LAYER_DIRS[k]))))
+		Promise.all(
+			TILE_LAYER_KEYS.map((k) => loadManifest(manifestUrl(LAYER_DIRS[k]))),
+		)
 			.then((loaded) => {
 				const next = {} as Manifests;
-				keys.forEach((k, i) => {
+				TILE_LAYER_KEYS.forEach((k, i) => {
 					next[k] = loaded[i] ?? null;
 				});
 				setManifests(next);
@@ -205,6 +273,26 @@ const App = () => {
 	// layer to its tiled-data range. (See ADR memory: don't pull viewState
 	// into React for this.)
 	const layers = [
+		// Commute-tier hulls — background context. Drawn first so transit
+		// lines and stops sit on top. Static GeoJSON, no manifest gate.
+		new GeoJsonLayer({
+			id: "commute-hulls-train",
+			data: COMMUTE_HULLS_TRAIN_URL,
+			visible: visible.commuteTrain,
+			pickable: false,
+			stroked: false,
+			filled: true,
+			getFillColor: commuteFillColor(TRAIN_COLOR),
+		}),
+		new GeoJsonLayer({
+			id: "commute-hulls-tram",
+			data: COMMUTE_HULLS_TRAM_URL,
+			visible: visible.commuteTram,
+			pickable: false,
+			stroked: false,
+			filled: true,
+			getFillColor: commuteFillColor(TRAM_COLOR),
+		}),
 		manifests.suburbs &&
 			new MVTLayer({
 				id: "suburbs-sal",
@@ -407,6 +495,7 @@ const App = () => {
 				}}
 				controller
 				layers={layers}
+				getTooltip={pickToTooltip}
 			>
 				<BaseMap mapStyle={MAP_STYLE} />
 			</DeckGL>
