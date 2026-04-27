@@ -8,17 +8,13 @@ import {
 	makeGatedTileFetch,
 } from "@/lib/tile-manifest";
 
-// MVT tile trees built by the Python ETL — `etl tile sal` and `etl tile isochrone`.
+// MVT tile trees built by the Python ETL — `etl tile sal|isochrone|ptv-lines|ptv-stops`.
 // Layout matches the XYZ scheme MVTLayer expects via URL-template substitution.
 // Each tile tree carries a manifest.json listing the (z,x,y) coords with data;
 // the frontend gates fetches against it so out-of-range coords don't 404.
 const TILES_BASE = `${import.meta.env.BASE_URL}data/tiles`;
-const SAL_TILES_URL = `${TILES_BASE}/suburbs/{z}/{x}/{y}.pbf`;
-const SAL_MANIFEST_URL = `${TILES_BASE}/suburbs/manifest.json`;
-const ISO_FOOT_5_TILES_URL = `${TILES_BASE}/iso_foot_5/{z}/{x}/{y}.pbf`;
-const ISO_FOOT_5_MANIFEST_URL = `${TILES_BASE}/iso_foot_5/manifest.json`;
-const ISO_FOOT_15_TILES_URL = `${TILES_BASE}/iso_foot_15/{z}/{x}/{y}.pbf`;
-const ISO_FOOT_15_MANIFEST_URL = `${TILES_BASE}/iso_foot_15/manifest.json`;
+const tileUrl = (dir: string) => `${TILES_BASE}/${dir}/{z}/{x}/{y}.pbf`;
+const manifestUrl = (dir: string) => `${TILES_BASE}/${dir}/manifest.json`;
 
 // CartoDB's dark-matter style is a free, no-auth MapLibre style. Matches the
 // aesthetic of the predecessor VanillaJS site (see docs/context/history.md).
@@ -38,14 +34,27 @@ type DbStatus =
 	| { state: "ready"; message: string; tables: TableCount[] }
 	| { state: "error"; message: string };
 
-type LayerKey = "suburbs" | "iso5" | "iso15";
+type LayerKey =
+	| "suburbs"
+	| "iso5"
+	| "iso15"
+	| "trainLines"
+	| "trainStops"
+	| "tramLines"
+	| "tramStops";
 
 type LayerVisibility = Record<LayerKey, boolean>;
 
-type Manifests = {
-	suburbs: LoadedManifest | null;
-	iso5: LoadedManifest | null;
-	iso15: LoadedManifest | null;
+type Manifests = Record<LayerKey, LoadedManifest | null>;
+
+const LAYER_DIRS: Record<LayerKey, string> = {
+	suburbs: "suburbs",
+	iso15: "iso_foot_15",
+	iso5: "iso_foot_5",
+	trainLines: "ptv_lines_metro_train",
+	trainStops: "ptv_stops_metro_train",
+	tramLines: "ptv_lines_metro_tram",
+	tramStops: "ptv_stops_metro_tram",
 };
 
 const LAYER_DEFS: ReadonlyArray<{
@@ -56,7 +65,16 @@ const LAYER_DEFS: ReadonlyArray<{
 	{ key: "suburbs", label: "Suburb boundaries", hint: "ABS SAL 2021" },
 	{ key: "iso15", label: "15-min walk corridor", hint: "PTV stops · foot" },
 	{ key: "iso5", label: "5-min walk corridor", hint: "PTV stops · foot" },
+	{ key: "trainLines", label: "Train lines", hint: "PTV · METRO TRAIN" },
+	{ key: "trainStops", label: "Train stops", hint: "PTV · METRO TRAIN" },
+	{ key: "tramLines", label: "Tram lines", hint: "PTV · METRO TRAM" },
+	{ key: "tramStops", label: "Tram stops", hint: "PTV · METRO TRAM" },
 ];
+
+// Brand-ish colors picked to be distinguishable from the warm iso layers
+// and the yellow SAL boundaries while still reading as transit-y.
+const TRAIN_COLOR: [number, number, number] = [255, 140, 0]; // orange
+const TRAM_COLOR: [number, number, number] = [220, 60, 220]; // magenta
 
 const App = () => {
 	const [status, setStatus] = useState<DbStatus>({
@@ -67,11 +85,19 @@ const App = () => {
 		suburbs: null,
 		iso5: null,
 		iso15: null,
+		trainLines: null,
+		trainStops: null,
+		tramLines: null,
+		tramStops: null,
 	});
 	const [visible, setVisible] = useState<LayerVisibility>({
 		suburbs: true,
 		iso5: true,
 		iso15: true,
+		trainLines: true,
+		trainStops: true,
+		tramLines: true,
+		tramStops: true,
 	});
 
 	// React 19 StrictMode double-invokes effects in dev. Guard so we don't
@@ -98,27 +124,31 @@ const App = () => {
 				console.error("DuckDB init failed:", err);
 			});
 
-		Promise.all([
-			loadManifest(SAL_MANIFEST_URL),
-			loadManifest(ISO_FOOT_5_MANIFEST_URL),
-			loadManifest(ISO_FOOT_15_MANIFEST_URL),
-		])
-			.then(([suburbs, iso5, iso15]) => setManifests({ suburbs, iso5, iso15 }))
+		const keys = Object.keys(LAYER_DIRS) as LayerKey[];
+		Promise.all(keys.map((k) => loadManifest(manifestUrl(LAYER_DIRS[k]))))
+			.then((loaded) => {
+				const next = {} as Manifests;
+				keys.forEach((k, i) => {
+					next[k] = loaded[i] ?? null;
+				});
+				setManifests(next);
+			})
 			.catch((err: unknown) => {
 				console.error("Tile manifest load failed:", err);
 			});
 	}, []);
 
-	// Layer order matters — first in array is drawn first (under). Suburb
-	// boundaries on the bottom; 15-min corridor as the wider catchment;
-	// 5-min corridor on top as the "right next to PT" highlight.
-	// Layers are gated until their manifest is loaded — keeps fetches scoped to
-	// known-existing tiles.
+	// Layer order matters — first in array is drawn first (under). The stack:
+	//   suburbs (bottom)  -> 15-min walk -> 5-min walk -> train lines ->
+	//   tram lines -> train stops -> tram stops (top).
+	// Lines render under stops so the stop dots aren't half-hidden by the
+	// route line going through them. Layers are gated until their manifest
+	// is loaded — keeps fetches scoped to known-existing tiles.
 	const layers = [
 		manifests.suburbs &&
 			new MVTLayer({
 				id: "suburbs-sal",
-				data: SAL_TILES_URL,
+				data: tileUrl(LAYER_DIRS.suburbs),
 				minZoom: manifests.suburbs.manifest.minZoom,
 				maxZoom: manifests.suburbs.manifest.maxZoom,
 				extent: manifests.suburbs.manifest.bounds,
@@ -135,7 +165,7 @@ const App = () => {
 		manifests.iso15 &&
 			new MVTLayer({
 				id: "iso-foot-15",
-				data: ISO_FOOT_15_TILES_URL,
+				data: tileUrl(LAYER_DIRS.iso15),
 				minZoom: manifests.iso15.manifest.minZoom,
 				maxZoom: manifests.iso15.manifest.maxZoom,
 				extent: manifests.iso15.manifest.bounds,
@@ -149,7 +179,7 @@ const App = () => {
 		manifests.iso5 &&
 			new MVTLayer({
 				id: "iso-foot-5",
-				data: ISO_FOOT_5_TILES_URL,
+				data: tileUrl(LAYER_DIRS.iso5),
 				minZoom: manifests.iso5.manifest.minZoom,
 				maxZoom: manifests.iso5.manifest.maxZoom,
 				extent: manifests.iso5.manifest.bounds,
@@ -159,6 +189,80 @@ const App = () => {
 				pickable: false,
 				getFillColor: [255, 165, 70, 90],
 				fetch: makeGatedTileFetch(manifests.iso5),
+			}),
+		manifests.trainLines &&
+			new MVTLayer({
+				id: "ptv-lines-train",
+				data: tileUrl(LAYER_DIRS.trainLines),
+				minZoom: manifests.trainLines.manifest.minZoom,
+				maxZoom: manifests.trainLines.manifest.maxZoom,
+				extent: manifests.trainLines.manifest.bounds,
+				visible: visible.trainLines,
+				stroked: true,
+				filled: false,
+				pickable: false,
+				getLineColor: [...TRAIN_COLOR, 220],
+				getLineWidth: 2,
+				lineWidthMinPixels: 1.5,
+				fetch: makeGatedTileFetch(manifests.trainLines),
+			}),
+		manifests.tramLines &&
+			new MVTLayer({
+				id: "ptv-lines-tram",
+				data: tileUrl(LAYER_DIRS.tramLines),
+				minZoom: manifests.tramLines.manifest.minZoom,
+				maxZoom: manifests.tramLines.manifest.maxZoom,
+				extent: manifests.tramLines.manifest.bounds,
+				visible: visible.tramLines,
+				stroked: true,
+				filled: false,
+				pickable: false,
+				getLineColor: [...TRAM_COLOR, 200],
+				getLineWidth: 1.5,
+				lineWidthMinPixels: 1,
+				fetch: makeGatedTileFetch(manifests.tramLines),
+			}),
+		manifests.trainStops &&
+			new MVTLayer({
+				id: "ptv-stops-train",
+				data: tileUrl(LAYER_DIRS.trainStops),
+				minZoom: manifests.trainStops.manifest.minZoom,
+				maxZoom: manifests.trainStops.manifest.maxZoom,
+				extent: manifests.trainStops.manifest.bounds,
+				visible: visible.trainStops,
+				pickable: true,
+				pointType: "circle",
+				pointRadiusUnits: "pixels",
+				getPointRadius: 4.5,
+				pointRadiusMinPixels: 3,
+				stroked: true,
+				filled: true,
+				getFillColor: [...TRAIN_COLOR, 230],
+				getLineColor: [20, 20, 20, 220],
+				getLineWidth: 1,
+				lineWidthMinPixels: 1,
+				fetch: makeGatedTileFetch(manifests.trainStops),
+			}),
+		manifests.tramStops &&
+			new MVTLayer({
+				id: "ptv-stops-tram",
+				data: tileUrl(LAYER_DIRS.tramStops),
+				minZoom: manifests.tramStops.manifest.minZoom,
+				maxZoom: manifests.tramStops.manifest.maxZoom,
+				extent: manifests.tramStops.manifest.bounds,
+				visible: visible.tramStops,
+				pickable: true,
+				pointType: "circle",
+				pointRadiusUnits: "pixels",
+				getPointRadius: 3,
+				pointRadiusMinPixels: 2,
+				stroked: true,
+				filled: true,
+				getFillColor: [...TRAM_COLOR, 220],
+				getLineColor: [20, 20, 20, 180],
+				getLineWidth: 0.75,
+				lineWidthMinPixels: 0.75,
+				fetch: makeGatedTileFetch(manifests.tramStops),
 			}),
 	].filter(Boolean);
 

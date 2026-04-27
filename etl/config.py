@@ -44,6 +44,25 @@ ISOCHRONE_DURATIONS = (5, 15)
 # stop within the corridor, not the corridor itself.
 ISOCHRONE_KEEP_PROPERTIES = ("minutes", "isochrone_mode")
 
+# PTV (Public Transport Victoria) lines + stops, sourced from the upstream
+# isochrones project. Lines are per-route LineStrings; stops are per-stop
+# Points enriched with commute-time-to-CBD tiering.
+PTV_ORIGINALS = ORIGINALS_DIR / "ptv"
+PTV_MODES = ("metro_train", "metro_tram")
+
+# Lines: HEADSIGN repeats LONG_NAME, SHAPE_ID is internal — drop both.
+PTV_LINE_KEEP_PROPERTIES = ("SHORT_NAME", "LONG_NAME", "MODE")
+
+# Stops: keep the nearest commute-tier (5/10/15/20+ min to Southern Cross)
+# for future color-coding; drop raw distance + raw minutes since the tier
+# is the rendering primitive we'll actually use.
+PTV_STOP_KEEP_PROPERTIES = (
+    "STOP_ID",
+    "STOP_NAME",
+    "MODE",
+    "transit_time_minutes_nearest_tier",
+)
+
 # Default Douglas-Peucker tolerance (in EPSG:4326 degrees) for the published
 # single-file GeoJSON. ~0.0001° ≈ 11 m at the equator — invisible at suburb
 # zoom levels (9-13). Set to 0 to disable simplification.

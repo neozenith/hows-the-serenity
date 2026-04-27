@@ -14,7 +14,8 @@
 			"!!**/e2e-screenshots",
 			"!!**/playwright-report",
 			"!!**/test-results",
-			"!!**/tmp"
+			"!!**/tmp",
+			"!!public/data"
 		]
 	},
 	"formatter": {

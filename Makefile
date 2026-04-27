@@ -5,7 +5,7 @@
 .PHONY: typecheck typecheck-ts typecheck-py
 .PHONY: test test-ts test-py test-watch test-ui test-e2e test-e2e-ui
 .PHONY: fix ci
-.PHONY: etl-extract etl-extract-iso etl-publish etl-tile etl-tile-iso etl-status data
+.PHONY: etl-extract etl-extract-iso etl-extract-ptv etl-publish etl-tile etl-tile-iso etl-tile-ptv etl-status data
 .PHONY: port-debug port-clean agentic-port-clean
 
 # =============================================================================
@@ -175,13 +175,32 @@ $(ISO_FOOT_5_TILES_DIR): $(ISO_FOOT_PARQUET) | install-py
 $(ISO_FOOT_15_TILES_DIR): $(ISO_FOOT_PARQUET) | install-py
 	$(ETL_RUN) tile isochrone --duration 15
 
+# PTV (Public Transport Victoria) lines + stops — train + tram
+PTV_MODES := metro_train metro_tram
+PTV_LINE_PARQUETS := $(foreach m,$(PTV_MODES),data/converted/ptv_lines_$(m).parquet)
+PTV_STOP_PARQUETS := $(foreach m,$(PTV_MODES),data/converted/ptv_stops_$(m).parquet)
+PTV_LINE_TILES_DIRS := $(foreach m,$(PTV_MODES),public/data/tiles/ptv_lines_$(m))
+PTV_STOP_TILES_DIRS := $(foreach m,$(PTV_MODES),public/data/tiles/ptv_stops_$(m))
+
+etl-extract-ptv: $(PTV_LINE_PARQUETS) $(PTV_STOP_PARQUETS) ## Extract PTV lines + stops (both modes) -> parquet
+data/converted/ptv_lines_%.parquet: data/originals/ptv/lines_within_union_%.geojson | install-py
+	$(ETL_RUN) extract ptv-lines --mode $*
+data/converted/ptv_stops_%.parquet: data/originals/ptv/stops_with_commute_times_%.geojson | install-py
+	$(ETL_RUN) extract ptv-stops --mode $*
+
+etl-tile-ptv: $(PTV_LINE_TILES_DIRS) $(PTV_STOP_TILES_DIRS) ## Tile PTV lines + stops (both modes) -> MVT
+public/data/tiles/ptv_lines_%: data/converted/ptv_lines_%.parquet | install-py
+	$(ETL_RUN) tile ptv-lines --mode $*
+public/data/tiles/ptv_stops_%: data/converted/ptv_stops_%.parquet | install-py
+	$(ETL_RUN) tile ptv-stops --mode $*
+
 etl-publish: install-py ## Publish full SAL parquet -> single GeoJSON (legacy / reference)
 	$(ETL_RUN) publish sal
 
 etl-status: install-py ## Show pipeline artifact status
 	$(ETL_RUN) status
 
-data: etl-extract etl-tile etl-extract-iso etl-tile-iso ## Build all geospatial outputs
+data: etl-extract etl-tile etl-extract-iso etl-tile-iso etl-extract-ptv etl-tile-ptv ## Build all geospatial outputs
 
 # =============================================================================
 # Port Management

@@ -19,11 +19,23 @@ from etl.config import (
     CONVERTED_DIR,
     ISOCHRONE_DURATIONS,
     ISOCHRONES_ORIGINALS,
+    PTV_LINE_KEEP_PROPERTIES,
+    PTV_MODES,
+    PTV_ORIGINALS,
+    PTV_STOP_KEEP_PROPERTIES,
     PUBLIC_DATA_DIR,
     SAL_SIMPLIFY_TOLERANCE,
 )
 from etl.logging_setup import configure
-from etl.steps import extract_isochrones, extract_sal, publish_sal, tile_isochrone, tile_sal
+from etl.steps import (
+    extract_isochrones,
+    extract_ptv,
+    extract_sal,
+    publish_sal,
+    tile_isochrone,
+    tile_ptv,
+    tile_sal,
+)
 
 # ---- Default file paths (single source of truth for CLI defaults) -----------
 
@@ -35,6 +47,30 @@ SAL_TILES_DIR = TILES_DIR / "suburbs"
 
 ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
 ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
+
+
+def _ptv_lines_source(mode: str) -> Path:
+    return PTV_ORIGINALS / f"lines_within_union_{mode}.geojson"
+
+
+def _ptv_stops_source(mode: str) -> Path:
+    return PTV_ORIGINALS / f"stops_with_commute_times_{mode}.geojson"
+
+
+def _ptv_lines_parquet(mode: str) -> Path:
+    return CONVERTED_DIR / f"ptv_lines_{mode}.parquet"
+
+
+def _ptv_stops_parquet(mode: str) -> Path:
+    return CONVERTED_DIR / f"ptv_stops_{mode}.parquet"
+
+
+def _ptv_lines_tiles_dir(mode: str) -> Path:
+    return PUBLIC_DATA_DIR / "tiles" / f"ptv_lines_{mode}"
+
+
+def _ptv_stops_tiles_dir(mode: str) -> Path:
+    return PUBLIC_DATA_DIR / "tiles" / f"ptv_stops_{mode}"
 
 
 # ---- Subcommand handlers ----------------------------------------------------
@@ -82,6 +118,42 @@ def cmd_tile_isochrone(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_extract_ptv_lines(args: argparse.Namespace) -> None:
+    extract_ptv.run(
+        input_geojson=_ptv_lines_source(args.mode),
+        output_parquet=_ptv_lines_parquet(args.mode),
+        keep_properties=PTV_LINE_KEEP_PROPERTIES,
+    )
+
+
+def cmd_extract_ptv_stops(args: argparse.Namespace) -> None:
+    extract_ptv.run(
+        input_geojson=_ptv_stops_source(args.mode),
+        output_parquet=_ptv_stops_parquet(args.mode),
+        keep_properties=PTV_STOP_KEEP_PROPERTIES,
+    )
+
+
+def cmd_tile_ptv_lines(args: argparse.Namespace) -> None:
+    tile_ptv.run(
+        input_parquet=_ptv_lines_parquet(args.mode),
+        output_dir=PUBLIC_DATA_DIR / "tiles",
+        layer_name="ptv_lines",
+        layer_dir=f"ptv_lines_{args.mode}",
+        keep_properties=PTV_LINE_KEEP_PROPERTIES,
+    )
+
+
+def cmd_tile_ptv_stops(args: argparse.Namespace) -> None:
+    tile_ptv.run(
+        input_parquet=_ptv_stops_parquet(args.mode),
+        output_dir=PUBLIC_DATA_DIR / "tiles",
+        layer_name="ptv_stops",
+        layer_dir=f"ptv_stops_{args.mode}",
+        keep_properties=PTV_STOP_KEEP_PROPERTIES,
+    )
+
+
 def cmd_status(_: argparse.Namespace) -> None:
     rows: list[tuple[str, Path, str]] = [
         ("SAL zip (input)", SAL_ZIP, "file"),
@@ -94,6 +166,11 @@ def cmd_status(_: argparse.Namespace) -> None:
             (f"Iso foot {d}min MVT tiles", TILES_DIR / f"iso_foot_{d}", "dir")
             for d in ISOCHRONE_DURATIONS
         ],
+        ("PTV source dir", PTV_ORIGINALS, "dir"),
+        *[(f"PTV lines {m} parquet", _ptv_lines_parquet(m), "file") for m in PTV_MODES],
+        *[(f"PTV stops {m} parquet", _ptv_stops_parquet(m), "file") for m in PTV_MODES],
+        *[(f"PTV lines {m} MVT tiles", _ptv_lines_tiles_dir(m), "dir") for m in PTV_MODES],
+        *[(f"PTV stops {m} MVT tiles", _ptv_stops_tiles_dir(m), "dir") for m in PTV_MODES],
     ]
     print(f"{'Artifact':<30}  {'Exists':<7}  {'Size':>10}  Path")
     print("-" * 100)
@@ -162,6 +239,22 @@ def build_parser() -> argparse.ArgumentParser:
     iso_extract.add_argument("--mode", default="foot", help="Travel mode label")
     iso_extract.set_defaults(func=cmd_extract_isochrones)
 
+    ptv_lines_extract = extract_sub.add_parser(
+        "ptv-lines", help="Extract PTV line GeoJSON to pruned parquet"
+    )
+    ptv_lines_extract.add_argument(
+        "--mode", choices=PTV_MODES, default="metro_train", help="PTV mode"
+    )
+    ptv_lines_extract.set_defaults(func=cmd_extract_ptv_lines)
+
+    ptv_stops_extract = extract_sub.add_parser(
+        "ptv-stops", help="Extract PTV stop GeoJSON to pruned parquet"
+    )
+    ptv_stops_extract.add_argument(
+        "--mode", choices=PTV_MODES, default="metro_train", help="PTV mode"
+    )
+    ptv_stops_extract.set_defaults(func=cmd_extract_ptv_stops)
+
     # `etl publish <source>`
     publish_p = top_sub.add_parser("publish", help="Publish intermediate to public/data GeoJSON")
     publish_p.set_defaults(func=_help(publish_p))
@@ -218,6 +311,14 @@ def build_parser() -> argparse.ArgumentParser:
     iso_tile.add_argument("--min-zoom", type=int, default=9, help="Minimum zoom level")
     iso_tile.add_argument("--max-zoom", type=int, default=12, help="Maximum zoom level")
     iso_tile.set_defaults(func=cmd_tile_isochrone)
+
+    ptv_lines_tile = tile_sub.add_parser("ptv-lines", help="Tile PTV line parquet to MVT XYZ tiles")
+    ptv_lines_tile.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
+    ptv_lines_tile.set_defaults(func=cmd_tile_ptv_lines)
+
+    ptv_stops_tile = tile_sub.add_parser("ptv-stops", help="Tile PTV stop parquet to MVT XYZ tiles")
+    ptv_stops_tile.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
+    ptv_stops_tile.set_defaults(func=cmd_tile_ptv_stops)
 
     # `etl status`
     status_p = top_sub.add_parser("status", help="Show current state of pipeline artifacts")

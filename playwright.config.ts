@@ -13,7 +13,10 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
 	testDir: "./e2e",
-	timeout: 90_000,
+	// Bumped from 90s as the layer count grew; full-page screenshots after
+	// 7 MVTLayer settling can run 60s+ on a cold dev server. Re-evaluate if
+	// total runtime starts dominating CI.
+	timeout: 180_000,
 	expect: { timeout: 10_000 },
 	fullyParallel: true,
 	forbidOnly: Boolean(process.env.CI),
