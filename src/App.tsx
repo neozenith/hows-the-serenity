@@ -30,8 +30,16 @@ const tileLifecycle = (layerId: string) => ({
 // Layout matches the XYZ scheme MVTLayer expects via URL-template substitution.
 // Each tile tree carries a manifest.json listing the (z,x,y) coords with data;
 // the frontend gates fetches against it so out-of-range coords don't 404.
+//
+// Cache-busting: the manifest carries a `version` int (unix epoch from when
+// the ETL last ran). We append it as `?v=<version>` to every tile URL so the
+// browser treats a new ETL run as fresh resources rather than reusing stale
+// bytes from its 10-minute Pages cache window.
 const TILES_BASE = `${import.meta.env.BASE_URL}data/tiles`;
-const tileUrl = (dir: string) => `${TILES_BASE}/${dir}/{z}/{x}/{y}.pbf`;
+const tileUrl = (dir: string, version?: number) => {
+	const base = `${TILES_BASE}/${dir}/{z}/{x}/{y}.pbf`;
+	return version === undefined ? base : `${base}?v=${version}`;
+};
 const manifestUrl = (dir: string) => `${TILES_BASE}/${dir}/manifest.json`;
 
 // CartoDB's dark-matter style is a free, no-auth MapLibre style. Matches the
@@ -200,7 +208,7 @@ const App = () => {
 		manifests.suburbs &&
 			new MVTLayer({
 				id: "suburbs-sal",
-				data: tileUrl(LAYER_DIRS.suburbs),
+				data: tileUrl(LAYER_DIRS.suburbs, manifests.suburbs.manifest.version),
 				minZoom: manifests.suburbs.manifest.minZoom,
 				maxZoom: manifests.suburbs.manifest.maxZoom,
 				extent: manifests.suburbs.manifest.bounds,
@@ -218,7 +226,7 @@ const App = () => {
 		manifests.iso15 &&
 			new MVTLayer({
 				id: "iso-foot-15",
-				data: tileUrl(LAYER_DIRS.iso15),
+				data: tileUrl(LAYER_DIRS.iso15, manifests.iso15.manifest.version),
 				minZoom: manifests.iso15.manifest.minZoom,
 				maxZoom: manifests.iso15.manifest.maxZoom,
 				extent: manifests.iso15.manifest.bounds,
@@ -233,7 +241,7 @@ const App = () => {
 		manifests.iso5 &&
 			new MVTLayer({
 				id: "iso-foot-5",
-				data: tileUrl(LAYER_DIRS.iso5),
+				data: tileUrl(LAYER_DIRS.iso5, manifests.iso5.manifest.version),
 				minZoom: manifests.iso5.manifest.minZoom,
 				maxZoom: manifests.iso5.manifest.maxZoom,
 				extent: manifests.iso5.manifest.bounds,
@@ -248,7 +256,10 @@ const App = () => {
 		manifests.trainLines &&
 			new MVTLayer({
 				id: "ptv-lines-train",
-				data: tileUrl(LAYER_DIRS.trainLines),
+				data: tileUrl(
+					LAYER_DIRS.trainLines,
+					manifests.trainLines.manifest.version,
+				),
 				minZoom: manifests.trainLines.manifest.minZoom,
 				maxZoom: manifests.trainLines.manifest.maxZoom,
 				extent: manifests.trainLines.manifest.bounds,
@@ -265,7 +276,10 @@ const App = () => {
 		manifests.tramLines &&
 			new MVTLayer({
 				id: "ptv-lines-tram",
-				data: tileUrl(LAYER_DIRS.tramLines),
+				data: tileUrl(
+					LAYER_DIRS.tramLines,
+					manifests.tramLines.manifest.version,
+				),
 				minZoom: manifests.tramLines.manifest.minZoom,
 				maxZoom: manifests.tramLines.manifest.maxZoom,
 				extent: manifests.tramLines.manifest.bounds,
@@ -282,7 +296,10 @@ const App = () => {
 		manifests.trainStops &&
 			new MVTLayer({
 				id: "ptv-stops-train",
-				data: tileUrl(LAYER_DIRS.trainStops),
+				data: tileUrl(
+					LAYER_DIRS.trainStops,
+					manifests.trainStops.manifest.version,
+				),
 				minZoom: manifests.trainStops.manifest.minZoom,
 				maxZoom: manifests.trainStops.manifest.maxZoom,
 				extent: manifests.trainStops.manifest.bounds,
@@ -304,7 +321,10 @@ const App = () => {
 		manifests.tramStops &&
 			new MVTLayer({
 				id: "ptv-stops-tram",
-				data: tileUrl(LAYER_DIRS.tramStops),
+				data: tileUrl(
+					LAYER_DIRS.tramStops,
+					manifests.tramStops.manifest.version,
+				),
 				minZoom: manifests.tramStops.manifest.minZoom,
 				maxZoom: manifests.tramStops.manifest.maxZoom,
 				extent: manifests.tramStops.manifest.bounds,
@@ -326,7 +346,10 @@ const App = () => {
 		manifests.regionalTrainLines &&
 			new MVTLayer({
 				id: "ptv-lines-regional-train",
-				data: tileUrl(LAYER_DIRS.regionalTrainLines),
+				data: tileUrl(
+					LAYER_DIRS.regionalTrainLines,
+					manifests.regionalTrainLines.manifest.version,
+				),
 				minZoom: manifests.regionalTrainLines.manifest.minZoom,
 				maxZoom: manifests.regionalTrainLines.manifest.maxZoom,
 				extent: manifests.regionalTrainLines.manifest.bounds,
@@ -343,7 +366,10 @@ const App = () => {
 		manifests.regionalTrainStops &&
 			new MVTLayer({
 				id: "ptv-stops-regional-train",
-				data: tileUrl(LAYER_DIRS.regionalTrainStops),
+				data: tileUrl(
+					LAYER_DIRS.regionalTrainStops,
+					manifests.regionalTrainStops.manifest.version,
+				),
 				minZoom: manifests.regionalTrainStops.manifest.minZoom,
 				maxZoom: manifests.regionalTrainStops.manifest.maxZoom,
 				extent: manifests.regionalTrainStops.manifest.bounds,

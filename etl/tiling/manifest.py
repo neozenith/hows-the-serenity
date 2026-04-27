@@ -11,17 +11,24 @@ Manifest schema (stable — frontend depends on these field names):
     {
       "name": "<layer name in MVT, e.g. 'suburbs'>",
       "format": "pbf",
+      "version": <int unix epoch when manifest was written>,
       "minZoom": <int>,
       "maxZoom": <int>,
       "bounds": [west, south, east, north],   // EPSG:4326 degrees
       "tiles": ["<z>/<x>/<y>", ...]           // one entry per tile with data
     }
+
+The `version` field is a cache-busting key — the frontend appends it as a
+`?v=<version>` query string to every tile URL, so the browser treats each
+manifest version as a fresh resource. New ETL run -> new version -> fresh
+fetches; unchanged tile content reuses the cached bytes within a version.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -47,6 +54,7 @@ def write_manifest(
     payload = {
         "name": layer_name,
         "format": "pbf",
+        "version": int(time.time()),
         "minZoom": min_zoom,
         "maxZoom": max_zoom,
         "bounds": list(bounds_4326),

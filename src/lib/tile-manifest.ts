@@ -3,9 +3,12 @@ import { MVTLoader } from "@loaders.gl/mvt";
 import { recordTileSize } from "./tile-stats";
 
 // Schema mirrors etl/tiling/manifest.py — keep field names in sync.
+// `version` is a unix-epoch int written at ETL time and used by the
+// frontend as a `?v=<version>` cache-bust query string on each tile URL.
 export type TileManifest = {
 	name: string;
 	format: "pbf";
+	version: number;
 	minZoom: number;
 	maxZoom: number;
 	bounds: [number, number, number, number];
@@ -20,7 +23,12 @@ export type LoadedManifest = {
 export const loadManifest = async (
 	manifestUrl: string,
 ): Promise<LoadedManifest> => {
-	const res = await fetch(manifestUrl);
+	// `cache: "no-cache"` forces an If-None-Match revalidation on every page
+	// load — Pages returns 304 (just headers, ~200 B) when the manifest is
+	// unchanged, or 200 with the new bytes when it isn't. Without this, the
+	// browser would treat the manifest like any other static asset and serve
+	// up to 10 minutes of stale data after a deploy.
+	const res = await fetch(manifestUrl, { cache: "no-cache" });
 	if (!res.ok) {
 		throw new Error(`Manifest fetch failed: ${manifestUrl} (${res.status})`);
 	}
