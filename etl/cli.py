@@ -123,6 +123,11 @@ def cmd_extract_ptv_lines(args: argparse.Namespace) -> None:
         output_parquet=_ptv_lines_parquet(args.mode),
         keep_properties=PTV_LINE_KEEP_PROPERTIES,
         mode_filter=PTV_MODE_LABELS[args.mode],
+        # Dissolve by route name — collapses the many shape/headsign
+        # variants of each physical track into one MultiLineString,
+        # deduping overlapping segments via unary_union. Train + V/Line
+        # lines drop from thousands of features to ~15-20 each.
+        dissolve_by="LONG_NAME",
     )
 
 

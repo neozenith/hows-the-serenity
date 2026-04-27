@@ -33,6 +33,7 @@ def run(
     mode_filter: str | None = None,
     drop_rail_replacement: bool = True,
     dedupe_by: str | None = None,
+    dissolve_by: str | None = None,
 ) -> int:
     """Extract a pruned + optionally MODE-filtered parquet from a PTV GeoJSON.
 
@@ -48,6 +49,16 @@ def run(
     `dedupe_by` (optional column name) collapses duplicate rows via
     `groupby(col).first()` — used for stops where multi-platform records
     repeat the same logical interchange. Match upstream `utils.py:86-90`.
+    Cheap; preserves arbitrary one row's geometry per group. Use only
+    when geometries within a group are co-located (e.g. Points).
+
+    `dissolve_by` (optional column name) collapses duplicate rows via
+    `gpd.dissolve(col)` — does a unary_union of geometries within each
+    group, deduplicating overlapping segments. Used for line layers
+    where the source has many shape variants (different headsigns,
+    directions, time-of-day patterns) of the same physical track.
+    Reduces feature count from thousands to dozens for typical PTV
+    line data — major frame-time win on the GPU side.
     """
     if not input_geojson.exists():
         raise FileNotFoundError(f"PTV source not found: {input_geojson}")
@@ -77,6 +88,33 @@ def run(
             gdf = gdf[~gdf["STOP_NAME"].astype(str).str.contains(_RAIL_REPLACEMENT_STOP_PATTERN)]
             if before != len(gdf):
                 log.info("Dropped %d rail-replacement-bus stops", before - len(gdf))
+
+    if dissolve_by is not None and dissolve_by in gdf.columns:
+        before = len(gdf)
+        before_vertices = sum(
+            sum(len(g.coords) for g in (geom.geoms if hasattr(geom, "geoms") else [geom]))
+            for geom in gdf.geometry
+            if geom is not None and not geom.is_empty
+        )
+        # `as_index=False` keeps the grouped column as a regular column.
+        # `aggfunc="first"` for non-grouped columns (default). The geometry
+        # column is replaced by the unary_union per group — overlapping
+        # segments deduplicate, dramatically dropping total vertex count.
+        gdf = gdf.dissolve(by=dissolve_by, as_index=False)
+        after_vertices = sum(
+            sum(len(g.coords) for g in (geom.geoms if hasattr(geom, "geoms") else [geom]))
+            for geom in gdf.geometry
+            if geom is not None and not geom.is_empty
+        )
+        log.info(
+            "Dissolved by %s: features %d -> %d, vertices %d -> %d (%.0f%% reduction)",
+            dissolve_by,
+            before,
+            len(gdf),
+            before_vertices,
+            after_vertices,
+            (1 - after_vertices / max(before_vertices, 1)) * 100,
+        )
 
     if dedupe_by is not None and dedupe_by in gdf.columns:
         before = len(gdf)
