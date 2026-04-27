@@ -91,11 +91,33 @@ const TRAIN_COLOR: [number, number, number] = [255, 140, 0]; // orange — metro
 const TRAM_COLOR: [number, number, number] = [220, 60, 220]; // magenta — tram
 const REGIONAL_TRAIN_COLOR: [number, number, number] = [80, 220, 130]; // green — V/Line
 
+// Per-layer viewport-zoom visibility gates. Returns true when the layer
+// should be drawn at the current zoom. SAL has thousands of polygons within
+// metro Melbourne at z>6 and dominates frame time during pan/zoom — gating
+// it to country-overview zoom gives back the snappy interaction without
+// removing the suburb context entirely. Add an entry here to opt another
+// layer into zoom-based gating without touching the layer list.
+type ZoomGate = { min?: number; max?: number };
+const ZOOM_GATES: Partial<Record<LayerKey, ZoomGate>> = {
+	suburbs: { max: 6 },
+};
+const passesZoomGate = (key: LayerKey, zoom: number): boolean => {
+	const gate = ZOOM_GATES[key];
+	if (!gate) return true;
+	if (gate.min !== undefined && zoom < gate.min) return false;
+	if (gate.max !== undefined && zoom > gate.max) return false;
+	return true;
+};
+
 const App = () => {
 	const [status, setStatus] = useState<DbStatus>({
 		state: "loading",
 		message: "Initialising DuckDB…",
 	});
+	// Controlled view state — needed so per-layer zoom gates can read the
+	// current zoom and toggle visibility. Switching from initialViewState
+	// (uncontrolled) is the cost of admission for any reactive viewport logic.
+	const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW_STATE);
 	const [manifests, setManifests] = useState<Manifests>({
 		suburbs: null,
 		iso5: null,
@@ -171,7 +193,7 @@ const App = () => {
 				minZoom: manifests.suburbs.manifest.minZoom,
 				maxZoom: manifests.suburbs.manifest.maxZoom,
 				extent: manifests.suburbs.manifest.bounds,
-				visible: visible.suburbs,
+				visible: visible.suburbs && passesZoomGate("suburbs", viewState.zoom),
 				stroked: true,
 				filled: true,
 				pickable: true,
@@ -327,11 +349,18 @@ const App = () => {
 
 	return (
 		<div className="absolute inset-0 bg-neutral-900">
-			<DeckGL initialViewState={INITIAL_VIEW_STATE} controller layers={layers}>
+			<DeckGL
+				viewState={viewState}
+				onViewStateChange={(params) =>
+					setViewState(params.viewState as MapViewState)
+				}
+				controller
+				layers={layers}
+			>
 				<BaseMap mapStyle={MAP_STYLE} />
 			</DeckGL>
 			<StatusPanel status={status} />
-			<LayerPanel visible={visible} onToggle={toggle} />
+			<LayerPanel visible={visible} onToggle={toggle} zoom={viewState.zoom} />
 		</div>
 	);
 };
@@ -372,31 +401,51 @@ const StatusPanel = ({ status }: { status: DbStatus }) => (
 const LayerPanel = ({
 	visible,
 	onToggle,
+	zoom,
 }: {
 	visible: LayerVisibility;
 	onToggle: (key: LayerKey) => void;
+	zoom: number;
 }) => (
-	<aside className="absolute top-4 right-4 z-10 w-56 rounded-md bg-white/95 px-4 py-3 text-sm shadow-md backdrop-blur">
-		<h2 className="mb-2 text-sm font-semibold text-neutral-900">Layers</h2>
+	<aside className="absolute top-4 right-4 z-10 w-60 rounded-md bg-white/95 px-4 py-3 text-sm shadow-md backdrop-blur">
+		<h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold text-neutral-900">
+			<span>Layers</span>
+			<span className="text-xs font-normal text-neutral-500">
+				z {zoom.toFixed(1)}
+			</span>
+		</h2>
 		<ul className="space-y-1.5">
-			{LAYER_DEFS.map((layer) => (
-				<li key={layer.key}>
-					<label className="flex cursor-pointer items-center gap-2 text-neutral-700">
-						<input
-							type="checkbox"
-							className="h-3.5 w-3.5 cursor-pointer accent-neutral-700"
-							checked={visible[layer.key]}
-							onChange={() => onToggle(layer.key)}
-						/>
-						<span className="flex-1">
-							<span className="block text-neutral-900">{layer.label}</span>
-							<span className="block text-xs text-neutral-500">
-								{layer.hint}
+			{LAYER_DEFS.map((layer) => {
+				const checked = visible[layer.key];
+				const zoomGated = !passesZoomGate(layer.key, zoom);
+				return (
+					<li key={layer.key}>
+						<label className="flex cursor-pointer items-center gap-2 text-neutral-700">
+							<input
+								type="checkbox"
+								className="h-3.5 w-3.5 cursor-pointer accent-neutral-700"
+								checked={checked}
+								onChange={() => onToggle(layer.key)}
+							/>
+							<span className="flex-1">
+								<span
+									className={`block ${
+										checked && zoomGated
+											? "text-neutral-400 line-through"
+											: "text-neutral-900"
+									}`}
+								>
+									{layer.label}
+								</span>
+								<span className="block text-xs text-neutral-500">
+									{layer.hint}
+									{checked && zoomGated && " · hidden at this zoom"}
+								</span>
 							</span>
-						</span>
-					</label>
-				</li>
-			))}
+						</label>
+					</li>
+				);
+			})}
 		</ul>
 	</aside>
 );

@@ -38,17 +38,13 @@ def run(
 
     if mode_filter is not None:
         if "MODE" not in gdf.columns:
-            raise ValueError(
-                f"mode_filter={mode_filter!r} requested but no MODE column on input"
-            )
+            raise ValueError(f"mode_filter={mode_filter!r} requested but no MODE column on input")
         before = len(gdf)
         gdf = gdf[gdf["MODE"] == mode_filter]
         log.info("Filtered MODE==%r: %d -> %d features", mode_filter, before, len(gdf))
         if gdf.empty:
             available = sorted(set(gpd.read_file(input_geojson)["MODE"].dropna().unique()))
-            raise ValueError(
-                f"No features for MODE={mode_filter!r}. Available: {available}"
-            )
+            raise ValueError(f"No features for MODE={mode_filter!r}. Available: {available}")
 
     keep = list(keep_properties)
     missing = [p for p in keep if p not in gdf.columns]
