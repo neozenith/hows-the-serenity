@@ -1,5 +1,6 @@
 import { load } from "@loaders.gl/core";
 import { MVTLoader } from "@loaders.gl/mvt";
+import { recordTileSize } from "./tile-stats";
 
 // Schema mirrors etl/tiling/manifest.py — keep field names in sync.
 export type TileManifest = {
@@ -37,22 +38,33 @@ export const loadManifest = async (
 // errors; out-of-manifest coords resolve to an empty array (no fetch, no render,
 // no console noise). MVTLayer treats an empty parsed-tile response as "nothing
 // to render here" and moves on.
+//
+// The fetch also records each tile's byte size into tile-stats so the debug
+// overlay can compute cumulative memory pressure when onTileLoad fires later.
 export const makeGatedTileFetch = (loaded: LoadedManifest) => {
 	const TILE_URL_PATTERN = /\/(\d+)\/(\d+)\/(\d+)\.pbf(?:\?|$)/;
 	return async (
 		url: string,
-		context: { loadOptions?: unknown; signal?: AbortSignal },
+		context: { loadOptions?: unknown; signal?: AbortSignal; layer?: { id?: string } },
 	): Promise<unknown> => {
 		const match = url.match(TILE_URL_PATTERN);
-		if (match) {
-			const [, z, x, y] = match;
-			const key = `${z}/${x}/${y}`;
-			if (!loaded.available.has(key)) return [];
+		const tileKey = match ? `${match[1]}/${match[2]}/${match[3]}` : null;
+		if (tileKey && !loaded.available.has(tileKey)) return [];
+		// Manual fetch + parse so we can capture the byte size before parsing
+		// hands the buffer to loaders.gl (which would then own it). MVTLoader
+		// must be passed explicitly — Vite/Pages serve .pbf without a
+		// Content-Type, so loaders.gl's auto-detection has nothing to match.
+		const response = await fetch(url, context.signal ? { signal: context.signal } : {});
+		if (!response.ok) {
+			throw new Error(
+				`In-manifest tile fetch failed (manifest claims it exists): ${url} (${response.status})`,
+			);
 		}
-		// Fall through to loaders.gl with MVTLoader passed explicitly. We can't
-		// rely on auto-detection from the response MIME type — Vite/Pages serve
-		// .pbf files without a Content-Type, so the loader registry has nothing
-		// to match against.
-		return load(url, MVTLoader, context.loadOptions as never);
+		const buffer = await response.arrayBuffer();
+		const layerId = context.layer?.id;
+		if (layerId && tileKey) {
+			recordTileSize(layerId, tileKey, buffer.byteLength);
+		}
+		return load(buffer, MVTLoader, context.loadOptions as never);
 	};
 };

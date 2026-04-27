@@ -1,12 +1,30 @@
 import { DeckGL, type MapViewState, MVTLayer } from "deck.gl";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
+import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
 import { initRentalDb, type TableCount } from "@/lib/duckdb";
 import {
 	type LoadedManifest,
 	loadManifest,
 	makeGatedTileFetch,
 } from "@/lib/tile-manifest";
+import { recordTileLoad, recordTileUnload } from "@/lib/tile-stats";
+
+// Wires onTileLoad / onTileUnload props for a layer into the tile-stats
+// singleton. The byte size for each tile is captured by the gated fetch
+// before these fire; here we just look up & accumulate. Tile objects from
+// MVTLayer have a `.index: {x, y, z}` shape.
+type TileLifecycleArg = { index: { x: number; y: number; z: number } };
+const tileLifecycle = (layerId: string) => ({
+	onTileLoad: (tile: TileLifecycleArg) => {
+		const { z, x, y } = tile.index;
+		recordTileLoad(layerId, `${z}/${x}/${y}`);
+	},
+	onTileUnload: (tile: TileLifecycleArg) => {
+		const { z, x, y } = tile.index;
+		recordTileUnload(layerId, `${z}/${x}/${y}`);
+	},
+});
 
 // MVT tile trees built by the Python ETL — `etl tile sal|isochrone|ptv-lines|ptv-stops`.
 // Layout matches the XYZ scheme MVTLayer expects via URL-template substitution.
@@ -195,6 +213,7 @@ const App = () => {
 				getLineWidth: 2,
 				lineWidthMinPixels: 1,
 				fetch: makeGatedTileFetch(manifests.suburbs),
+				...tileLifecycle("suburbs-sal"),
 			}),
 		manifests.iso15 &&
 			new MVTLayer({
@@ -209,6 +228,7 @@ const App = () => {
 				pickable: false,
 				getFillColor: [80, 180, 220, 50],
 				fetch: makeGatedTileFetch(manifests.iso15),
+				...tileLifecycle("iso-foot-15"),
 			}),
 		manifests.iso5 &&
 			new MVTLayer({
@@ -223,6 +243,7 @@ const App = () => {
 				pickable: false,
 				getFillColor: [255, 165, 70, 90],
 				fetch: makeGatedTileFetch(manifests.iso5),
+				...tileLifecycle("iso-foot-5"),
 			}),
 		manifests.trainLines &&
 			new MVTLayer({
@@ -239,6 +260,7 @@ const App = () => {
 				getLineWidth: 2,
 				lineWidthMinPixels: 1.5,
 				fetch: makeGatedTileFetch(manifests.trainLines),
+				...tileLifecycle("ptv-lines-train"),
 			}),
 		manifests.tramLines &&
 			new MVTLayer({
@@ -255,6 +277,7 @@ const App = () => {
 				getLineWidth: 1.5,
 				lineWidthMinPixels: 1,
 				fetch: makeGatedTileFetch(manifests.tramLines),
+				...tileLifecycle("ptv-lines-tram"),
 			}),
 		manifests.trainStops &&
 			new MVTLayer({
@@ -276,6 +299,7 @@ const App = () => {
 				getLineWidth: 1,
 				lineWidthMinPixels: 1,
 				fetch: makeGatedTileFetch(manifests.trainStops),
+				...tileLifecycle("ptv-stops-train"),
 			}),
 		manifests.tramStops &&
 			new MVTLayer({
@@ -297,6 +321,7 @@ const App = () => {
 				getLineWidth: 0.75,
 				lineWidthMinPixels: 0.75,
 				fetch: makeGatedTileFetch(manifests.tramStops),
+				...tileLifecycle("ptv-stops-tram"),
 			}),
 		manifests.regionalTrainLines &&
 			new MVTLayer({
@@ -313,6 +338,7 @@ const App = () => {
 				getLineWidth: 2,
 				lineWidthMinPixels: 1.5,
 				fetch: makeGatedTileFetch(manifests.regionalTrainLines),
+				...tileLifecycle("ptv-lines-regional-train"),
 			}),
 		manifests.regionalTrainStops &&
 			new MVTLayer({
@@ -334,6 +360,7 @@ const App = () => {
 				getLineWidth: 1,
 				lineWidthMinPixels: 1,
 				fetch: makeGatedTileFetch(manifests.regionalTrainStops),
+				...tileLifecycle("ptv-stops-regional-train"),
 			}),
 	].filter(Boolean);
 
@@ -363,6 +390,7 @@ const App = () => {
 				onToggle={toggle}
 				zoomLabelRef={zoomLabelRef}
 			/>
+			<TileMemoryOverlay />
 		</div>
 	);
 };
