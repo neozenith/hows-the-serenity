@@ -17,6 +17,7 @@
 	},
 	"dependencies": {
 		"@base-ui/react": "^1.4.1",
+		"@deck.gl/extensions": "^9.3.1",
 		"@deck.gl/react": "^9.3.1",
 		"@duckdb/duckdb-wasm": "^1.33.1-dev45.0",
 		"@fontsource-variable/geist": "^5.2.8",

@@ -1,3 +1,4 @@
+import { PathStyleExtension } from "@deck.gl/extensions";
 import { DeckGL, GeoJsonLayer, type MapViewState, MVTLayer } from "deck.gl";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
@@ -5,14 +6,44 @@ import {
 	SuburbPlotPanel,
 	type SuburbSelection,
 } from "@/components/SuburbPlotPanel";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
 import { initRentalDb, type TableCount } from "@/lib/duckdb";
+import { loadSuburbMappings } from "@/lib/suburb-mappings";
+import { overlayThemeClass, useOverlayTheme } from "@/lib/theme";
 import {
 	type LoadedManifest,
 	loadManifest,
 	makeGatedTileFetch,
 } from "@/lib/tile-manifest";
-import { recordTileLoad, recordTileUnload } from "@/lib/tile-stats";
+import {
+	getTileStatsSnapshot,
+	recordTileLoad,
+	recordTileUnload,
+} from "@/lib/tile-stats";
+
+// Tiny diagnostic surface used by e2e tests:
+//   __htsTileCount(layerId)   — current loaded tile count for a deck.gl layer.
+//   __htsSelectSuburb(name,c) — programmatically open the plot panel.
+//
+// `__htsSelectSuburb` exists because synthesized clicks against deck.gl's
+// WebGL canvas don't reliably reach the picking pipeline in headless
+// Playwright — the picking framebuffer races the input event loop. We still
+// want to e2e-verify the *plot render* path (DuckDB query → Plotly load →
+// chart paint without errors), so the test bypasses the picking step and
+// drives selection directly. Manual users still exercise the full click path.
+declare global {
+	interface Window {
+		__htsTileCount?: (layerId: string) => number;
+		__htsSelectSuburb?: (selection: SuburbSelection | null) => void;
+	}
+}
+if (typeof window !== "undefined") {
+	window.__htsTileCount = (layerId: string) => {
+		const snap = getTileStatsSnapshot();
+		return snap.byLayer.find((l) => l.layerId === layerId)?.tileCount ?? 0;
+	};
+}
 
 // Wires onTileLoad / onTileUnload props for a layer into the tile-stats
 // singleton. The byte size for each tile is captured by the gated fetch
@@ -160,21 +191,31 @@ const pickToTooltip = (info: {
 	return null;
 };
 
-// Brand-ish colors picked to be distinguishable from the warm iso layers
-// and the yellow SAL boundaries while still reading as transit-y.
-const TRAIN_COLOR: [number, number, number] = [255, 140, 0]; // orange — metro train
-const TRAM_COLOR: [number, number, number] = [220, 60, 220]; // magenta — tram
-const REGIONAL_TRAIN_COLOR: [number, number, number] = [80, 220, 130]; // green — V/Line
+// Official PTV brand colours: Metro blue, Yarra Trams green, V/Line purple.
+// Sourced from PTV's brand guidelines — these are the canonical identifiers
+// that match the printed network maps and station signage.
+const TRAIN_COLOR: [number, number, number] = [31, 117, 188]; // PTV #1F75BC — Metro blue
+const TRAM_COLOR: [number, number, number] = [120, 190, 32]; // Yarra Trams #78BE20 — green
+const REGIONAL_TRAIN_COLOR: [number, number, number] = [88, 44, 131]; // V/Line #582C83 — purple
 
-// Commute-tier hull opacity per band — closer-to-CBD = more opaque.
-// `undefined` falls back to the smallest opacity. Tiers are 15/30/45/60 min.
+// Commute-tier hull alpha per band — closer-to-CBD = more opaque, fades
+// outward so the boundary "recedes" with travel time. Used as line-stroke
+// alpha (the hulls render as outlines, not fills); same scale-out feel
+// transfers fine. `undefined` falls back to the smallest alpha.
+// Tiers are 15/30/45/60 min from Southern Cross.
+//
+// Linear ramp 50%→80% (128→204 in 0–255 space):
+//   15-min → 204 (80%) — innermost, most prominent
+//   30-min → 178 (≈70%)
+//   45-min → 153 (≈60%)
+//   60-min → 128 (50%) — outermost, faintest
 const COMMUTE_TIER_ALPHA: Record<number, number> = {
-	15: 70,
-	30: 50,
-	45: 32,
-	60: 18,
+	15: 204,
+	30: 178,
+	45: 153,
+	60: 128,
 };
-const commuteFillColor =
+const commuteTierColor =
 	(base: [number, number, number]) =>
 	(f: { properties?: { transit_time_minutes_nearest_tier?: number } }) => {
 		const tier = f.properties?.transit_time_minutes_nearest_tier ?? 60;
@@ -205,6 +246,10 @@ const App = () => {
 	const [selectedSuburb, setSelectedSuburb] = useState<SuburbSelection | null>(
 		null,
 	);
+	// Default: every layer on. Each is sufficiently subtle in its own way
+	// (SAL outline-only, walkability 10% fill + fine dotted stroke, transit
+	// lines + stops, commute hulls dashed) that they layer cleanly without
+	// fighting for attention. Toggle off via the controls panel as needed.
 	const [visible, setVisible] = useState<LayerVisibility>({
 		suburbs: true,
 		iso5: true,
@@ -215,8 +260,8 @@ const App = () => {
 		tramStops: true,
 		regionalTrainLines: true,
 		regionalTrainStops: true,
-		commuteTrain: false,
-		commuteTram: false,
+		commuteTrain: true,
+		commuteTram: true,
 	});
 
 	// React 19 StrictMode double-invokes effects in dev. Guard so we don't
@@ -231,6 +276,16 @@ const App = () => {
 	// viewport frame — so the callback identity churn isn't a hot path. See
 	// the project's Deck.GL-native ADR memory.
 	const zoomLabelRef = useRef<HTMLSpanElement | null>(null);
+
+	// Expose the suburb-selection setter on `window` for e2e tests. Re-runs
+	// on each render so the closure always points at the latest setter, but
+	// React's setState identity is stable across renders so this is cheap.
+	useEffect(() => {
+		window.__htsSelectSuburb = (sel) => setSelectedSuburb(sel);
+		return () => {
+			window.__htsSelectSuburb = undefined;
+		};
+	}, []);
 
 	useEffect(() => {
 		if (initOnce.current) return;
@@ -265,14 +320,31 @@ const App = () => {
 			.catch((err: unknown) => {
 				console.error("Tile manifest load failed:", err);
 			});
+
+		// Fire-and-forget — failure is non-fatal: the SuburbPlot falls back to
+		// raw SAL_NAME21 / SAL_CODE21 when the mapping isn't loaded.
+		loadSuburbMappings(`${import.meta.env.BASE_URL}data/suburb_mappings.json`)
+			.then((m) => {
+				console.log(
+					`[suburb-mappings] loaded · ${m.summary.totalSALs} SALs, ${m.summary.withRentalData} with rental, ${m.summary.withSalesData} with sales`,
+				);
+			})
+			.catch((err: unknown) => {
+				console.error("Suburb mappings load failed:", err);
+			});
 	}, []);
 
 	// Layer order matters — first in array is drawn first (under). The stack:
-	//   suburbs (bottom)  -> 15-min walk -> 5-min walk -> train lines ->
-	//   tram lines -> train stops -> tram stops (top).
+	//   commute hulls (bottom) -> 15-min walk -> 5-min walk -> train lines
+	//   -> tram lines -> train stops -> tram stops -> regional train lines
+	//   -> regional train stops -> SAL suburbs (top).
 	// Lines render under stops so the stop dots aren't half-hidden by the
-	// route line going through them. Layers are gated until their manifest
-	// is loaded — keeps fetches scoped to known-existing tiles.
+	// route line going through them. SAL renders last so its boundary lines
+	// + faint fill always read above transit context — they're the click
+	// target for the suburb plot panel and need to win z-order against
+	// every other layer (including picking precedence).
+	// Layers are gated until their manifest is loaded — keeps fetches
+	// scoped to known-existing tiles.
 	//
 	// Per-layer zoom range is enforced via MVTLayer's native `minZoom` /
 	// `maxZoom` props, sourced from each manifest. Below `minZoom` the layer
@@ -287,47 +359,33 @@ const App = () => {
 			data: COMMUTE_HULLS_TRAIN_URL,
 			visible: visible.commuteTrain,
 			pickable: false,
-			stroked: false,
-			filled: true,
-			getFillColor: commuteFillColor(TRAIN_COLOR),
+			stroked: true,
+			filled: false,
+			getLineColor: commuteTierColor(TRAIN_COLOR),
+			getLineWidth: 4,
+			lineWidthMinPixels: 3,
+			// Dashed stroke pattern. Values are in line-width units (multiplied
+			// by stroke width at render time), so [3, 2] reads as ~3px solid /
+			// ~2px gap on a 1px stroke. PathStyleExtension is what enables the
+			// dash machinery — without it, getDashArray is silently ignored.
+			getDashArray: [3, 2],
+			dashJustified: true,
+			extensions: [new PathStyleExtension({ dash: true })],
 		}),
 		new GeoJsonLayer({
 			id: "commute-hulls-tram",
 			data: COMMUTE_HULLS_TRAM_URL,
 			visible: visible.commuteTram,
 			pickable: false,
-			stroked: false,
-			filled: true,
-			getFillColor: commuteFillColor(TRAM_COLOR),
+			stroked: true,
+			filled: false,
+			getLineColor: commuteTierColor(TRAM_COLOR),
+			getLineWidth: 4,
+			lineWidthMinPixels: 3,
+			getDashArray: [3, 2],
+			dashJustified: true,
+			extensions: [new PathStyleExtension({ dash: true })],
 		}),
-		manifests.suburbs &&
-			new MVTLayer({
-				id: "suburbs-sal",
-				data: tileUrl(LAYER_DIRS.suburbs, manifests.suburbs.manifest.version),
-				minZoom: manifests.suburbs.manifest.minZoom,
-				maxZoom: manifests.suburbs.manifest.maxZoom,
-				extent: manifests.suburbs.manifest.bounds,
-				visible: visible.suburbs,
-				stroked: true,
-				filled: true,
-				pickable: true,
-				getFillColor: [200, 200, 50, 20],
-				getLineColor: [200, 200, 50, 180],
-				getLineWidth: 2,
-				lineWidthMinPixels: 1,
-				fetch: makeGatedTileFetch(manifests.suburbs),
-				onClick: (info: {
-					object?: { properties?: Record<string, unknown> } | null;
-				}) => {
-					const props = info.object?.properties;
-					const name = props?.SAL_NAME21;
-					const code = props?.SAL_CODE21;
-					if (typeof name === "string" && typeof code === "string") {
-						setSelectedSuburb({ name, code });
-					}
-				},
-				...tileLifecycle("suburbs-sal"),
-			}),
 		manifests.iso15 &&
 			new MVTLayer({
 				id: "iso-foot-15",
@@ -336,10 +394,19 @@ const App = () => {
 				maxZoom: manifests.iso15.manifest.maxZoom,
 				extent: manifests.iso15.manifest.bounds,
 				visible: visible.iso15,
-				stroked: false,
+				stroked: true,
 				filled: true,
 				pickable: false,
-				getFillColor: [80, 180, 220, 50],
+				// 10% fill + fine dotted stroke. Fill is a soft area-tint;
+				// the dotted edge gives the corridor a sketched, "approximate"
+				// feel that distinguishes it from the precise tile/road grid.
+				getFillColor: [80, 180, 220, 26],
+				getLineColor: [80, 180, 220, 200],
+				getLineWidth: 0.5,
+				lineWidthMinPixels: 1,
+				getDashArray: [1, 1.5],
+				dashJustified: true,
+				extensions: [new PathStyleExtension({ dash: true })],
 				fetch: makeGatedTileFetch(manifests.iso15),
 				...tileLifecycle("iso-foot-15"),
 			}),
@@ -351,10 +418,16 @@ const App = () => {
 				maxZoom: manifests.iso5.manifest.maxZoom,
 				extent: manifests.iso5.manifest.bounds,
 				visible: visible.iso5,
-				stroked: false,
+				stroked: true,
 				filled: true,
 				pickable: false,
-				getFillColor: [255, 165, 70, 90],
+				getFillColor: [255, 165, 70, 26],
+				getLineColor: [255, 165, 70, 200],
+				getLineWidth: 0.5,
+				lineWidthMinPixels: 1,
+				getDashArray: [1, 1.5],
+				dashJustified: true,
+				extensions: [new PathStyleExtension({ dash: true })],
 				fetch: makeGatedTileFetch(manifests.iso5),
 				...tileLifecycle("iso-foot-5"),
 			}),
@@ -393,8 +466,8 @@ const App = () => {
 				filled: false,
 				pickable: false,
 				getLineColor: [...TRAM_COLOR, 200],
-				getLineWidth: 1.5,
-				lineWidthMinPixels: 1,
+				getLineWidth: 2,
+				lineWidthMinPixels: 1.5,
 				fetch: makeGatedTileFetch(manifests.tramLines),
 				...tileLifecycle("ptv-lines-tram"),
 			}),
@@ -412,14 +485,18 @@ const App = () => {
 				pickable: true,
 				pointType: "circle",
 				pointRadiusUnits: "pixels",
-				getPointRadius: 4.5,
-				pointRadiusMinPixels: 3,
+				// Stop radius = 1.1 × line thickness. With unified line width
+				// 1.5px (the pixel floor on PTV lines at metro zoom), that's
+				// 1.65px radius → 3.3px diameter. "Barely larger than the line"
+				// while still registering as a station marker.
+				getPointRadius: 1.65,
+				pointRadiusMinPixels: 1.65,
 				stroked: true,
 				filled: true,
 				getFillColor: [...TRAIN_COLOR, 230],
 				getLineColor: [20, 20, 20, 220],
-				getLineWidth: 1,
-				lineWidthMinPixels: 1,
+				getLineWidth: 0.5,
+				lineWidthMinPixels: 0.5,
 				fetch: makeGatedTileFetch(manifests.trainStops),
 				...tileLifecycle("ptv-stops-train"),
 			}),
@@ -437,14 +514,16 @@ const App = () => {
 				pickable: true,
 				pointType: "circle",
 				pointRadiusUnits: "pixels",
-				getPointRadius: 3,
-				pointRadiusMinPixels: 2,
+				// Same 1.1× line-thickness ratio as the other stops now that
+				// every PTV line shares the same width.
+				getPointRadius: 1.65,
+				pointRadiusMinPixels: 1.65,
 				stroked: true,
 				filled: true,
 				getFillColor: [...TRAM_COLOR, 220],
 				getLineColor: [20, 20, 20, 180],
-				getLineWidth: 0.75,
-				lineWidthMinPixels: 0.75,
+				getLineWidth: 0.5,
+				lineWidthMinPixels: 0.5,
 				fetch: makeGatedTileFetch(manifests.tramStops),
 				...tileLifecycle("ptv-stops-tram"),
 			}),
@@ -482,16 +561,58 @@ const App = () => {
 				pickable: true,
 				pointType: "circle",
 				pointRadiusUnits: "pixels",
-				getPointRadius: 4.5,
-				pointRadiusMinPixels: 3,
+				// Same 1.1× line-thickness ratio as the other stops.
+				getPointRadius: 1.65,
+				pointRadiusMinPixels: 1.65,
 				stroked: true,
 				filled: true,
 				getFillColor: [...REGIONAL_TRAIN_COLOR, 230],
 				getLineColor: [20, 20, 20, 220],
-				getLineWidth: 1,
-				lineWidthMinPixels: 1,
+				getLineWidth: 0.5,
+				lineWidthMinPixels: 0.5,
 				fetch: makeGatedTileFetch(manifests.regionalTrainStops),
 				...tileLifecycle("ptv-stops-regional-train"),
+			}),
+		// SAL suburbs — drawn LAST so it sits on top of every other layer
+		// for both visual emphasis and pick precedence (SAL is the click
+		// target for the plot panel; topmost-pickable wins). Faint 5% fill
+		// is just enough to anchor the polygon area visually without
+		// drowning the transit context underneath.
+		manifests.suburbs &&
+			new MVTLayer({
+				id: "suburbs-sal",
+				data: tileUrl(LAYER_DIRS.suburbs, manifests.suburbs.manifest.version),
+				minZoom: manifests.suburbs.manifest.minZoom,
+				maxZoom: manifests.suburbs.manifest.maxZoom,
+				extent: manifests.suburbs.manifest.bounds,
+				visible: visible.suburbs,
+				stroked: true,
+				filled: true,
+				pickable: true,
+				getFillColor: [200, 200, 50, 13], // 13/255 ≈ 5%
+				getLineColor: [200, 200, 50, 60],
+				getLineWidth: 2,
+				lineWidthMinPixels: 1,
+				fetch: makeGatedTileFetch(manifests.suburbs),
+				onClick: (info: {
+					object?: { properties?: Record<string, unknown> } | null;
+				}) => {
+					const props = info.object?.properties;
+					const name = props?.SAL_NAME21;
+					const rawCode = props?.SAL_CODE21;
+					// SAL_CODE21 is a string in our MVT tiles, but be defensive in
+					// case the encoder ever emits an integer for numeric-looking codes.
+					const code =
+						typeof rawCode === "string"
+							? rawCode
+							: typeof rawCode === "number"
+								? String(rawCode)
+								: null;
+					if (typeof name === "string" && code !== null) {
+						setSelectedSuburb({ name, code });
+					}
+				},
+				...tileLifecycle("suburbs-sal"),
 			}),
 	].filter(Boolean);
 
@@ -548,12 +669,18 @@ const ControlPanel = ({
 	onToggle: (key: LayerKey) => void;
 	zoomLabelRef: RefObject<HTMLSpanElement | null>;
 }) => {
-	const [collapsed, setCollapsed] = useState(false);
+	// Default collapsed — keeps the map area clear; user expands when needed.
+	const [collapsed, setCollapsed] = useState(true);
+	const { theme } = useOverlayTheme();
 	return (
 		<aside
-			className={`absolute top-4 left-4 z-10 ${
-				collapsed ? "w-auto" : "w-64"
-			} rounded-md bg-white/95 px-4 py-3 text-sm shadow-md backdrop-blur`}
+			className={[
+				"absolute top-4 left-4 z-10",
+				collapsed ? "w-auto" : "w-64",
+				"rounded-md px-4 py-3 text-sm shadow-md backdrop-blur",
+				"bg-white/95 dark:bg-neutral-900/90",
+				overlayThemeClass(theme),
+			].join(" ")}
 		>
 			<header className="flex items-center justify-between gap-2">
 				<div className="flex items-center gap-2">
@@ -562,7 +689,7 @@ const ControlPanel = ({
 						style={{ background: DOT_COLOR[status.state] }}
 						aria-hidden="true"
 					/>
-					<h1 className="text-base font-semibold text-neutral-900">
+					<h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-50">
 						How's the Serenity?
 					</h1>
 				</div>
@@ -573,16 +700,17 @@ const ControlPanel = ({
 						ref={zoomLabelRef}
 						role="status"
 						aria-label="Current zoom level"
-						className="text-xs tabular-nums text-neutral-500"
+						className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400"
 					>
 						z {INITIAL_VIEW_STATE.zoom.toFixed(1)}
 					</span>
+					<ThemeToggle />
 					<button
 						type="button"
 						onClick={() => setCollapsed((c) => !c)}
 						aria-expanded={!collapsed}
 						aria-label={collapsed ? "Show controls" : "Hide controls"}
-						className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+						className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
 					>
 						<span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
 					</button>
@@ -591,12 +719,14 @@ const ControlPanel = ({
 			{!collapsed && (
 				<div className="mt-2 space-y-3">
 					<section>
-						<p className="text-neutral-700">{status.message}</p>
+						<p className="text-neutral-700 dark:text-neutral-300">
+							{status.message}
+						</p>
 						{status.state === "ready" && status.tables.length > 0 && (
-							<ul className="mt-1 space-y-0.5 text-xs text-neutral-600">
+							<ul className="mt-1 space-y-0.5 text-xs text-neutral-600 dark:text-neutral-400">
 								{status.tables.map((t) => (
 									<li key={t.name}>
-										<code className="rounded bg-neutral-100 px-1 py-0.5">
+										<code className="rounded bg-neutral-100 px-1 py-0.5 dark:bg-neutral-800 dark:text-neutral-200">
 											{t.name}
 										</code>
 										{" · "}
@@ -606,26 +736,26 @@ const ControlPanel = ({
 							</ul>
 						)}
 					</section>
-					<hr className="border-neutral-200" />
+					<hr className="border-neutral-200 dark:border-neutral-700" />
 					<section>
-						<h2 className="mb-1.5 text-sm font-semibold text-neutral-900">
+						<h2 className="mb-1.5 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
 							Layers
 						</h2>
 						<ul className="space-y-1.5">
 							{LAYER_DEFS.map((layer) => (
 								<li key={layer.key}>
-									<label className="flex cursor-pointer items-center gap-2 text-neutral-700">
+									<label className="flex cursor-pointer items-center gap-2 text-neutral-700 dark:text-neutral-300">
 										<input
 											type="checkbox"
-											className="h-3.5 w-3.5 cursor-pointer accent-neutral-700"
+											className="h-3.5 w-3.5 cursor-pointer accent-neutral-700 dark:accent-neutral-300"
 											checked={visible[layer.key]}
 											onChange={() => onToggle(layer.key)}
 										/>
 										<span className="flex-1">
-											<span className="block text-neutral-900">
+											<span className="block text-neutral-900 dark:text-neutral-50">
 												{layer.label}
 											</span>
-											<span className="block text-xs text-neutral-500">
+											<span className="block text-xs text-neutral-500 dark:text-neutral-400">
 												{layer.hint}
 											</span>
 										</span>

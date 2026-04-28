@@ -4,7 +4,12 @@
 @import "@fontsource-variable/geist";
 @import "maplibre-gl/dist/maplibre-gl.css";
 
-@custom-variant dark (&:is(.dark *));
+/* Trigger `dark:` on the element itself OR any descendant of a `.dark`
+ * ancestor. The default shadcn variant only matches descendants, which
+ * forces a wrapping `<div class="dark">` for every dark-scoped subtree.
+ * Including `.dark` itself lets each overlay aside *be* the dark boundary
+ * directly, keeping positioning (the asides are absolute) clean. */
+@custom-variant dark (&:is(.dark, .dark *));
 
 @theme inline {
 	--font-heading: var(--font-sans);

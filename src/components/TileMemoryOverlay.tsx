@@ -5,6 +5,7 @@ import {
 	LONG_FRAME_THRESHOLD_MS,
 	subscribeFrameStats,
 } from "@/lib/frame-stats";
+import { overlayThemeClass, useOverlayTheme } from "@/lib/theme";
 import {
 	getTileStatsSnapshot,
 	subscribeTileStats,
@@ -34,7 +35,9 @@ const FRAME_CHART_CAP_MS = 120;
 const FORMAT_MB = (bytes: number) => `${(bytes / 1_048_576).toFixed(2)} MB`;
 
 export const TileMemoryOverlay = () => {
-	const [collapsed, setCollapsed] = useState(false);
+	// Default collapsed — debug-only widget, not always-visible UI.
+	const [collapsed, setCollapsed] = useState(true);
+	const { theme } = useOverlayTheme();
 
 	// Tile-memory refs
 	const totalBytesRef = useRef<HTMLSpanElement | null>(null);
@@ -131,18 +134,24 @@ export const TileMemoryOverlay = () => {
 
 	return (
 		<aside
-			className={`absolute right-4 bottom-4 z-10 ${
-				collapsed ? "w-auto" : "w-64"
-			} rounded-md bg-white/95 px-3 py-2 text-xs shadow-md backdrop-blur`}
+			className={[
+				"absolute right-4 bottom-4 z-10",
+				collapsed ? "w-auto" : "w-64",
+				"rounded-md px-3 py-2 text-xs shadow-md backdrop-blur",
+				"bg-white/95 dark:bg-neutral-900/90",
+				overlayThemeClass(theme),
+			].join(" ")}
 		>
 			<header className="flex items-center justify-between gap-2">
-				<h2 className="font-semibold text-neutral-900">Debug</h2>
+				<h2 className="font-semibold text-neutral-900 dark:text-neutral-50">
+					Debug
+				</h2>
 				<button
 					type="button"
 					onClick={() => setCollapsed((c) => !c)}
 					aria-expanded={!collapsed}
 					aria-label={collapsed ? "Show debug overlay" : "Hide debug overlay"}
-					className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+					className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
 				>
 					<span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
 				</button>
@@ -151,7 +160,7 @@ export const TileMemoryOverlay = () => {
 				<div className="mt-1.5 space-y-3">
 					{/* Tile memory section */}
 					<section>
-						<h3 className="mb-1 flex items-center gap-1.5 font-semibold text-neutral-700">
+						<h3 className="mb-1 flex items-center gap-1.5 font-semibold text-neutral-700 dark:text-neutral-300">
 							<span
 								className="inline-block h-2 w-2 rounded-sm"
 								style={{ background: CHART_LAYER_COLOR }}
@@ -159,35 +168,37 @@ export const TileMemoryOverlay = () => {
 							/>
 							Tile memory · {CHART_LAYER_LABEL}
 						</h3>
-						<dl className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600">
+						<dl className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 dark:text-neutral-400">
 							<div>
-								<dt className="text-neutral-500">tiles</dt>
+								<dt className="text-neutral-500 dark:text-neutral-500">
+									tiles
+								</dt>
 								<dd>
 									<span
 										ref={tileCountRef}
-										className="tabular-nums text-neutral-900"
+										className="tabular-nums text-neutral-900 dark:text-neutral-100"
 									>
 										0
 									</span>
 								</dd>
 							</div>
 							<div>
-								<dt className="text-neutral-500">live</dt>
+								<dt className="text-neutral-500 dark:text-neutral-500">live</dt>
 								<dd>
 									<span
 										ref={totalBytesRef}
-										className="tabular-nums text-neutral-900"
+										className="tabular-nums text-neutral-900 dark:text-neutral-100"
 									>
 										0.00 MB
 									</span>
 								</dd>
 							</div>
 							<div>
-								<dt className="text-neutral-500">peak</dt>
+								<dt className="text-neutral-500 dark:text-neutral-500">peak</dt>
 								<dd>
 									<span
 										ref={peakBytesRef}
-										className="tabular-nums text-neutral-900"
+										className="tabular-nums text-neutral-900 dark:text-neutral-100"
 									>
 										0.00 MB
 									</span>
@@ -197,7 +208,7 @@ export const TileMemoryOverlay = () => {
 						<svg
 							viewBox={`0 0 ${TILE_CHART_W} ${TILE_CHART_H}`}
 							preserveAspectRatio="none"
-							className="mt-1 block h-20 w-full rounded bg-neutral-100"
+							className="mt-1 block h-20 w-full rounded bg-neutral-100 dark:bg-neutral-800"
 							aria-label={`Cumulative ${CHART_LAYER_LABEL} tile memory over time`}
 						>
 							<polyline
@@ -213,35 +224,40 @@ export const TileMemoryOverlay = () => {
 
 					{/* Frame timing section */}
 					<section>
-						<h3 className="mb-1 font-semibold text-neutral-700">
+						<h3 className="mb-1 font-semibold text-neutral-700 dark:text-neutral-300">
 							Frame timing
 						</h3>
-						<dl className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600">
+						<dl className="grid grid-cols-3 gap-1 text-[10px] text-neutral-600 dark:text-neutral-400">
 							<div>
-								<dt className="text-neutral-500">fps</dt>
+								<dt className="text-neutral-500 dark:text-neutral-500">fps</dt>
 								<dd>
-									<span ref={fpsRef} className="tabular-nums text-neutral-900">
+									<span
+										ref={fpsRef}
+										className="tabular-nums text-neutral-900 dark:text-neutral-100"
+									>
 										60
 									</span>
 								</dd>
 							</div>
 							<div>
-								<dt className="text-neutral-500">last</dt>
+								<dt className="text-neutral-500 dark:text-neutral-500">last</dt>
 								<dd>
 									<span
 										ref={lastFrameRef}
-										className="tabular-nums text-neutral-900"
+										className="tabular-nums text-neutral-900 dark:text-neutral-100"
 									>
 										0.0 ms
 									</span>
 								</dd>
 							</div>
 							<div>
-								<dt className="text-neutral-500">{">50 ms"}</dt>
+								<dt className="text-neutral-500 dark:text-neutral-500">
+									{">50 ms"}
+								</dt>
 								<dd>
 									<span
 										ref={longFramesRef}
-										className="tabular-nums text-neutral-900"
+										className="tabular-nums text-neutral-900 dark:text-neutral-100"
 									>
 										0
 									</span>
@@ -251,7 +267,7 @@ export const TileMemoryOverlay = () => {
 						<svg
 							viewBox={`0 0 ${FRAME_CHART_W} ${FRAME_CHART_H}`}
 							preserveAspectRatio="none"
-							className="mt-1 block h-12 w-full rounded bg-neutral-100"
+							className="mt-1 block h-12 w-full rounded bg-neutral-100 dark:bg-neutral-800"
 							aria-label="Frame time over the last 120 frames"
 						>
 							{/* 50ms threshold — Chrome's rAF-violation line. */}

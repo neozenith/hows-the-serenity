@@ -36,6 +36,7 @@ from etl.config import (
 )
 from etl.logging_setup import configure
 from etl.steps import (
+    build_suburb_mappings,
     extract_isochrones,
     extract_ptv,
     extract_rental_sales,
@@ -54,6 +55,7 @@ SAL_PARQUET = CONVERTED_DIR / "sal_2021_aust_gda2020.parquet"
 SAL_GEOJSON = PUBLIC_DATA_DIR / "selected_sal_2021_aust_gda2020.geojson"
 TILES_DIR = PUBLIC_DATA_DIR / "tiles"
 SAL_TILES_DIR = TILES_DIR / "suburbs"
+SUBURB_MAPPINGS_JSON = PUBLIC_DATA_DIR / "suburb_mappings.json"
 
 ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
 ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
@@ -196,6 +198,14 @@ def cmd_extract_rental_sales(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_publish_suburb_mappings(args: argparse.Namespace) -> None:
+    build_suburb_mappings.build_suburb_mappings(
+        sal_parquet=args.sal_parquet,
+        rental_sales_duckdb=args.rental_sales_duckdb,
+        output_path=args.output,
+    )
+
+
 def cmd_status(_: argparse.Namespace) -> None:
     rows: list[tuple[str, Path, str]] = [
         ("SAL zip (input)", SAL_ZIP, "file"),
@@ -213,6 +223,8 @@ def cmd_status(_: argparse.Namespace) -> None:
         *[(f"PTV stops {m} parquet", _ptv_stops_parquet(m), "file") for m in PTV_MODES],
         *[(f"PTV lines {m} MVT tiles", _ptv_lines_tiles_dir(m), "dir") for m in PTV_MODES],
         *[(f"PTV stops {m} MVT tiles", _ptv_stops_tiles_dir(m), "dir") for m in PTV_MODES],
+        ("Rental/sales DuckDB", RENTAL_SALES_DUCKDB, "file"),
+        ("Suburb mappings JSON", SUBURB_MAPPINGS_JSON, "file"),
     ]
     print(f"{'Artifact':<30}  {'Exists':<7}  {'Size':>10}  Path")
     print("-" * 100)
@@ -360,6 +372,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hulls_publish.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
     hulls_publish.set_defaults(func=cmd_publish_commute_hulls)
+
+    suburb_mappings_publish = publish_sub.add_parser(
+        "suburb-mappings",
+        help=(
+            "Reconcile SAL_2021 polygons with rental_sales market groups "
+            "into a JSON lookup the SPA fetches at startup"
+        ),
+    )
+    suburb_mappings_publish.add_argument(
+        "--sal-parquet",
+        type=Path,
+        default=SAL_PARQUET,
+        help="SAL parquet (state-filtered, produced by `etl extract sal`)",
+    )
+    suburb_mappings_publish.add_argument(
+        "--rental-sales-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="rental_sales DuckDB (produced by `etl extract rental-sales`)",
+    )
+    suburb_mappings_publish.add_argument(
+        "--output",
+        type=Path,
+        default=SUBURB_MAPPINGS_JSON,
+        help="Output JSON path",
+    )
+    suburb_mappings_publish.set_defaults(func=cmd_publish_suburb_mappings)
 
     # `etl tile <source>`
     tile_p = top_sub.add_parser("tile", help="Tile intermediate Parquet to MVT XYZ tiles")
