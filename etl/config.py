@@ -29,6 +29,11 @@ GEOJSON_COORD_PRECISION = 6
 # Properties to retain on SAL features (per user spec — drop AREASQKM).
 SAL_KEEP_PROPERTIES = ("SAL_CODE21", "SAL_NAME21", "STE_CODE21", "STE_NAME21")
 
+# Properties to retain on LGA features. Same shape as SAL — local-government
+# code + name + state qualifier. ABS uses the LGA_2024 vintage so that's our
+# version cohort here.
+LGA_KEEP_PROPERTIES = ("LGA_CODE24", "LGA_NAME24", "STE_CODE21", "STE_NAME21")
+
 # Walking-isochrone source: per-stop GeoJSONs from the upstream isochrones
 # project. Each file contains 5/10/15-min contours as separate features.
 ISOCHRONES_ORIGINALS = ORIGINALS_DIR / "isochrones"
@@ -86,3 +91,9 @@ RENTAL_SALES_DUCKDB = PUBLIC_DATA_DIR / "rental_sales.duckdb"
 # Stop-gap until proper LoD/tiling lands; without it the full national SAL
 # layer is ~240 MB, well over GitHub's 100 MB hard file-size limit.
 SAL_SIMPLIFY_TOLERANCE = 0.0001
+
+# LGA polygons are an order of magnitude fewer than SALs (~80 features vs
+# 15k+) so the file size driver is the per-feature vertex count, not the
+# feature count. A coarser tolerance (0.0005° ≈ 55m) still preserves shape
+# at metro zoom and gets the file under 100 KB.
+LGA_SIMPLIFY_TOLERANCE = 0.0005

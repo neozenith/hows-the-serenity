@@ -3,7 +3,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 /**
  * Suburb-selection e2e: drive selection programmatically via the
- * `window.__htsSelectSuburb(...)` test hook, assert the plot panel
+ * `window.__htsSelectRegion(...)` test hook, assert the plot panel
  * renders, take a full-page screenshot, and verify there are no
  * console errors (especially no "Render error: …" in the
  * ErrorBoundary fallback).
@@ -99,11 +99,11 @@ test.describe("Suburb selection", () => {
 			);
 
 			// Wait for the test hook to be wired up — App.tsx mounts an effect
-			// that assigns `window.__htsSelectSuburb` on first render.
+			// that assigns `window.__htsSelectRegion` on first render.
 			await page.waitForFunction(
 				() =>
 					typeof (window as unknown as Record<string, unknown>)
-						.__htsSelectSuburb === "function",
+						.__htsSelectRegion === "function",
 				{ timeout: 10_000 },
 			);
 
@@ -118,14 +118,20 @@ test.describe("Suburb selection", () => {
 				.waitForLoadState("networkidle", { timeout: 15_000 })
 				.catch(() => {});
 
-			// Drive selection programmatically.
+			// Drive selection programmatically. Pass `kind: "suburb"` because
+			// this test exercises the SAL → suburb plot path; an LGA-flavoured
+			// counterpart would pass `kind: "lga"` with an LGA_CODE24.
 			await page.evaluate(
 				([name, code]) => {
 					const fn = (window as unknown as Record<string, unknown>)
-						.__htsSelectSuburb as
-						| ((sel: { name: string; code: string }) => void)
+						.__htsSelectRegion as
+						| ((sel: {
+								kind: "suburb" | "lga";
+								name: string;
+								code: string;
+						  }) => void)
 						| undefined;
-					fn?.({ name: name as string, code: code as string });
+					fn?.({ kind: "suburb", name: name as string, code: code as string });
 				},
 				[TARGET_NAME, TARGET_CODE],
 			);

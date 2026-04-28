@@ -3,8 +3,8 @@ import { DeckGL, GeoJsonLayer, type MapViewState, MVTLayer } from "deck.gl";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import {
+	type RegionSelection,
 	SuburbPlotPanel,
-	type SuburbSelection,
 } from "@/components/SuburbPlotPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
@@ -23,10 +23,10 @@ import {
 } from "@/lib/tile-stats";
 
 // Tiny diagnostic surface used by e2e tests:
-//   __htsTileCount(layerId)   — current loaded tile count for a deck.gl layer.
-//   __htsSelectSuburb(name,c) — programmatically open the plot panel.
+//   __htsTileCount(layerId)    — current loaded tile count for a deck.gl layer.
+//   __htsSelectRegion(sel)     — programmatically open the plot panel.
 //
-// `__htsSelectSuburb` exists because synthesized clicks against deck.gl's
+// `__htsSelectRegion` exists because synthesized clicks against deck.gl's
 // WebGL canvas don't reliably reach the picking pipeline in headless
 // Playwright — the picking framebuffer races the input event loop. We still
 // want to e2e-verify the *plot render* path (DuckDB query → Plotly load →
@@ -35,7 +35,7 @@ import {
 declare global {
 	interface Window {
 		__htsTileCount?: (layerId: string) => number;
-		__htsSelectSuburb?: (selection: SuburbSelection | null) => void;
+		__htsSelectRegion?: (selection: RegionSelection | null) => void;
 	}
 }
 if (typeof window !== "undefined") {
@@ -82,6 +82,7 @@ const manifestUrl = (dir: string) => `${TILES_BASE}/${dir}/manifest.json`;
 const STATIC_DATA_BASE = `${import.meta.env.BASE_URL}data`;
 const COMMUTE_HULLS_TRAIN_URL = `${STATIC_DATA_BASE}/commute_hulls_metro_train.geojson`;
 const COMMUTE_HULLS_TRAM_URL = `${STATIC_DATA_BASE}/commute_hulls_metro_tram.geojson`;
+const LGA_GEOJSON_URL = `${STATIC_DATA_BASE}/selected_lga_2024_aust_gda2020.geojson`;
 
 // CartoDB's dark-matter style is a free, no-auth MapLibre style. Matches the
 // aesthetic of the predecessor VanillaJS site (see docs/context/history.md).
@@ -114,7 +115,7 @@ type TileLayerKey =
 	| "regionalTrainStops";
 
 // Static-GeoJSON layers — too small to be worth tiling.
-type StaticLayerKey = "commuteTrain" | "commuteTram";
+type StaticLayerKey = "commuteTrain" | "commuteTram" | "lga";
 
 type LayerKey = TileLayerKey | StaticLayerKey;
 
@@ -141,6 +142,11 @@ const LAYER_DEFS: ReadonlyArray<{
 	label: string;
 	hint: string;
 }> = [
+	{
+		key: "lga",
+		label: "LGA boundaries",
+		hint: "ABS LGA 2024 · click for LGA-tier rental data",
+	},
 	{ key: "suburbs", label: "Suburb boundaries", hint: "ABS SAL 2021" },
 	{ key: "iso15", label: "15-min walk corridor", hint: "PTV stops · foot" },
 	{ key: "iso5", label: "5-min walk corridor", hint: "PTV stops · foot" },
@@ -187,6 +193,9 @@ const pickToTooltip = (info: {
 	if (typeof props.SAL_NAME21 === "string") {
 		const ste = typeof props.STE_NAME21 === "string" ? props.STE_NAME21 : "";
 		return { text: ste ? `${props.SAL_NAME21}\n${ste}` : props.SAL_NAME21 };
+	}
+	if (typeof props.LGA_NAME24 === "string") {
+		return { text: `${props.LGA_NAME24}\nLGA` };
 	}
 	return null;
 };
@@ -243,14 +252,16 @@ const App = () => {
 		regionalTrainLines: null,
 		regionalTrainStops: null,
 	});
-	const [selectedSuburb, setSelectedSuburb] = useState<SuburbSelection | null>(
+	const [selectedRegion, setSelectedRegion] = useState<RegionSelection | null>(
 		null,
 	);
 	// Default: every layer on. Each is sufficiently subtle in its own way
-	// (SAL outline-only, walkability 10% fill + fine dotted stroke, transit
-	// lines + stops, commute hulls dashed) that they layer cleanly without
-	// fighting for attention. Toggle off via the controls panel as needed.
+	// (LGA + SAL outline-only with 5% fill, walkability 10% fill + fine
+	// dotted stroke, transit lines + stops, commute hulls dashed) that they
+	// layer cleanly without fighting for attention. Toggle off via the
+	// controls panel as needed.
 	const [visible, setVisible] = useState<LayerVisibility>({
+		lga: true,
 		suburbs: true,
 		iso5: true,
 		iso15: true,
@@ -277,13 +288,13 @@ const App = () => {
 	// the project's Deck.GL-native ADR memory.
 	const zoomLabelRef = useRef<HTMLSpanElement | null>(null);
 
-	// Expose the suburb-selection setter on `window` for e2e tests. Re-runs
+	// Expose the region-selection setter on `window` for e2e tests. Re-runs
 	// on each render so the closure always points at the latest setter, but
 	// React's setState identity is stable across renders so this is cheap.
 	useEffect(() => {
-		window.__htsSelectSuburb = (sel) => setSelectedSuburb(sel);
+		window.__htsSelectRegion = (sel) => setSelectedRegion(sel);
 		return () => {
-			window.__htsSelectSuburb = undefined;
+			window.__htsSelectRegion = undefined;
 		};
 	}, []);
 
@@ -385,6 +396,41 @@ const App = () => {
 			getDashArray: [3, 2],
 			dashJustified: true,
 			extensions: [new PathStyleExtension({ dash: true })],
+		}),
+		// LGA polygons — clickable for LGA-tier rental data. Drawn under SAL
+		// so when both layers are on, SAL (last in layers[]) wins click
+		// precedence inside its smaller polygons; LGA picks up clicks that
+		// land outside any SAL (rare in metro Vic, common in regional Vic).
+		// Pink-ish stroke to distinguish from SAL's yellow.
+		new GeoJsonLayer({
+			id: "lga",
+			data: LGA_GEOJSON_URL,
+			visible: visible.lga,
+			pickable: true,
+			stroked: true,
+			filled: true,
+			getFillColor: [240, 100, 200, 13], // ≈5% pink fill, matches SAL faintness
+			getLineColor: [240, 100, 200, 180],
+			getLineWidth: 2,
+			lineWidthMinPixels: 1.5,
+			onClick: (info: {
+				object?: { properties?: Record<string, unknown> } | null;
+			}) => {
+				const props = info.object?.properties;
+				const name = props?.LGA_NAME24;
+				const rawCode = props?.LGA_CODE24;
+				// LGA_CODE24 is numeric in the source GeoJSON (5-digit int).
+				// Coerce to string so it matches the DuckDB VARCHAR column.
+				const code =
+					typeof rawCode === "string"
+						? rawCode
+						: typeof rawCode === "number"
+							? String(rawCode)
+							: null;
+				if (typeof name === "string" && code !== null) {
+					setSelectedRegion({ kind: "lga", name, code });
+				}
+			},
 		}),
 		manifests.iso15 &&
 			new MVTLayer({
@@ -609,7 +655,7 @@ const App = () => {
 								? String(rawCode)
 								: null;
 					if (typeof name === "string" && code !== null) {
-						setSelectedSuburb({ name, code });
+						setSelectedRegion({ kind: "suburb", name, code });
 					}
 				},
 				...tileLifecycle("suburbs-sal"),
@@ -645,8 +691,8 @@ const App = () => {
 			/>
 			<TileMemoryOverlay />
 			<SuburbPlotPanel
-				selection={selectedSuburb}
-				onClose={() => setSelectedSuburb(null)}
+				selection={selectedRegion}
+				onClose={() => setSelectedRegion(null)}
 			/>
 		</div>
 	);

@@ -19,6 +19,7 @@ from etl.config import (
     CONVERTED_DIR,
     ISOCHRONE_DURATIONS,
     ISOCHRONES_ORIGINALS,
+    LGA_SIMPLIFY_TOLERANCE,
     PTV_COMMUTE_HULL_KEEP_PROPERTIES,
     PTV_LINE_KEEP_PROPERTIES,
     PTV_LINES_GEOJSON,
@@ -42,6 +43,7 @@ from etl.steps import (
     extract_rental_sales,
     extract_sal,
     publish_commute_hulls,
+    publish_lga,
     publish_sal,
     tile_isochrone,
     tile_ptv,
@@ -53,6 +55,8 @@ from etl.steps import (
 SAL_ZIP = BOUNDARIES_ORIGINALS / "SAL_2021_AUST_GDA2020_SHP.zip"
 SAL_PARQUET = CONVERTED_DIR / "sal_2021_aust_gda2020.parquet"
 SAL_GEOJSON = PUBLIC_DATA_DIR / "selected_sal_2021_aust_gda2020.geojson"
+LGA_PARQUET = CONVERTED_DIR / "lga_2024_aust_gda2020.parquet"
+LGA_GEOJSON = PUBLIC_DATA_DIR / "selected_lga_2024_aust_gda2020.geojson"
 TILES_DIR = PUBLIC_DATA_DIR / "tiles"
 SAL_TILES_DIR = TILES_DIR / "suburbs"
 SUBURB_MAPPINGS_JSON = PUBLIC_DATA_DIR / "suburb_mappings.json"
@@ -188,11 +192,20 @@ def cmd_publish_commute_hulls(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_publish_lga(args: argparse.Namespace) -> None:
+    publish_lga.run(
+        input_parquet=args.input,
+        output_geojson=args.output,
+        simplify_tolerance=args.simplify_tolerance,
+    )
+
+
 def cmd_extract_rental_sales(args: argparse.Namespace) -> None:
     extract_rental_sales.run(
         input_dir=args.input,
         schema_file=args.schema,
         sal_parquet=args.sal_parquet,
+        lga_geojson=args.lga_geojson,
         output_parquet=args.output_parquet,
         output_duckdb=args.output_duckdb,
     )
@@ -300,6 +313,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="SAL boundary parquet (provides SAL_NAME21 -> SAL_CODE21 lookup)",
     )
     rental_sales_extract.add_argument(
+        "--lga-geojson",
+        type=Path,
+        default=LGA_GEOJSON,
+        help="LGA boundary GeoJSON (provides LGA_NAME24 -> LGA_CODE24 lookup)",
+    )
+    rental_sales_extract.add_argument(
         "--output-parquet",
         type=Path,
         default=RENTAL_SALES_PARQUET,
@@ -365,6 +384,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Douglas-Peucker tolerance in degrees (0 = no simplification)",
     )
     sal_publish.set_defaults(func=cmd_publish_sal)
+
+    lga_publish = publish_sub.add_parser("lga", help="Publish LGA_2024 (Vic) GeoJSON")
+    lga_publish.add_argument("--input", type=Path, default=LGA_PARQUET, help="Source parquet")
+    lga_publish.add_argument("--output", type=Path, default=LGA_GEOJSON, help="Output GeoJSON")
+    lga_publish.add_argument(
+        "--simplify-tolerance",
+        type=float,
+        default=LGA_SIMPLIFY_TOLERANCE,
+        help="Douglas-Peucker tolerance in degrees (0 = no simplification)",
+    )
+    lga_publish.set_defaults(func=cmd_publish_lga)
 
     hulls_publish = publish_sub.add_parser(
         "commute-hulls",

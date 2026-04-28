@@ -1,7 +1,16 @@
 import { getRentalDbConn, RENTAL_DB_ALIAS } from "./duckdb";
 
+// Region kinds the rental_sales table carries. Maps directly to the
+// `geospatial_type` column. "suburb" rows resolve via SAL_CODE21, "lga"
+// rows via LGA_CODE24.
+export type RegionKind = "suburb" | "lga";
+
 // One time-series result, grouped by the natural sub-segments the source
 // data carries: rental vs sales, dwelling type, bedroom count.
+//
+// The `Suburb` prefix on the type name pre-dates the LGA tier; left as-is
+// because the *shape* is identical for both region kinds and renaming it
+// would ripple through every chart consumer with no semantic gain.
 export type SuburbTimeSeries = {
 	dataType: "rental" | "sales";
 	dwellingType: string; // "house" | "unit" | "all" | ...
@@ -40,31 +49,36 @@ const tsToDate = (ts: unknown): Date => {
 	return new Date(String(ts));
 };
 
-// Match by SAL_CODE21 against the hyphen-joined `geospatial_codes` field.
-// The schema-mapped extract stores codes like "20495" (single suburb) or
-// "20495-22038" (a real-estate "suburb group" containing multiple SALs).
-// `'-' || x || '-'` lets us pattern-match a single code as a delimited
-// substring, avoiding false positives like "20495" matching "204950".
+// Match the requested region code against the hyphen-joined `geospatial_codes`
+// field. For suburbs the source stores codes like "20495" (single SAL) or
+// "20495-22038" (a market group spanning multiple SALs). LGA rows are always
+// single-coded but we use the same pattern uniformly. `'-' || x || '-'` lets
+// us pattern-match a single code as a delimited substring, avoiding false
+// positives like "20495" matching "204950".
+//
+// `geospatial_type` is the discriminator between SAL_CODE21-keyed suburb rows
+// and LGA_CODE24-keyed LGA rows; the second bound parameter selects the tier.
 const QUERY = `
 	SELECT data_type, dwelling_type, bedrooms, time_bucket, value
 	FROM ${RENTAL_DB_ALIAS}.rental_sales
 	WHERE statistic = 'median'
-	  AND geospatial_type = 'suburb'
+	  AND geospatial_type = ?
 	  AND '-' || geospatial_codes || '-' LIKE '%-' || ? || '-%'
 	ORDER BY data_type, dwelling_type, bedrooms, time_bucket
 `;
 
-export const querySuburbTimeSeries = async (
-	salCode: string,
+export const queryRegionTimeSeries = async (
+	regionKind: RegionKind,
+	regionCode: string,
 ): Promise<SuburbTimeSeries[]> => {
 	const conn = getRentalDbConn();
 	if (!conn) throw new Error("DuckDB not initialised yet");
 
-	// Prepared statement so the SAL_CODE21 is a bound parameter rather than
+	// Prepared statement so the region code is a bound parameter rather than
 	// inlined into SQL. Predecessor inlined; we don't.
 	const stmt = await conn.prepare(QUERY);
 	try {
-		const rs = await stmt.query(salCode);
+		const rs = await stmt.query(regionKind, regionCode);
 		const rows = rs.toArray() as unknown as Row[];
 
 		// Group rows into series by (data_type, dwelling_type, bedrooms).

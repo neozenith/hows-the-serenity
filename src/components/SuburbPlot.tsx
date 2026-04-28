@@ -8,11 +8,12 @@ import {
 } from "react";
 import * as FactoryMod from "react-plotly.js/factory";
 import {
-	querySuburbTimeSeries,
+	queryRegionTimeSeries,
 	type SuburbTimeSeries,
 } from "@/lib/rental-sales-query";
 import { lookupSuburb } from "@/lib/suburb-mappings";
 import { type OverlayTheme, useOverlayTheme } from "@/lib/theme";
+import type { RegionSelection } from "./SuburbPlotPanel";
 
 // Plotly's full bundle is ~3 MB; cartesian-dist-min is ~700 KB and includes
 // the scatter/line traces we need. Pair with react-plotly.js via its factory
@@ -123,7 +124,7 @@ const plotlyTheme = (theme: OverlayTheme) => {
 	};
 };
 
-export default function SuburbPlot({ salCode }: { salCode: string }) {
+export default function SuburbPlot({ region }: { region: RegionSelection }) {
 	const [series, setSeries] = useState<SuburbTimeSeries[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [view, setView] = useState<View>("rental");
@@ -132,12 +133,12 @@ export default function SuburbPlot({ salCode }: { salCode: string }) {
 	useEffect(() => {
 		setError(null);
 		setSeries(null);
-		querySuburbTimeSeries(salCode)
+		queryRegionTimeSeries(region.kind, region.code)
 			.then(setSeries)
 			.catch((err: unknown) => {
 				setError(err instanceof Error ? err.message : String(err));
 			});
-	}, [salCode]);
+	}, [region.kind, region.code]);
 
 	// Partition once per data load. `useMemo` because the partition feeds
 	// directly into Plotly's `data` prop, which deep-compares for re-render.
@@ -196,7 +197,11 @@ export default function SuburbPlot({ salCode }: { salCode: string }) {
 	// rows. Surfacing the group label tells the user "you're seeing the
 	// rolled-up market rent for this larger area" rather than letting them
 	// assume the chart is per-suburb.
-	const mapping = lookupSuburb(salCode);
+	//
+	// LGAs are already the largest geographic tier and don't collapse into
+	// multi-region groups, so the badge only applies to suburb selections.
+	const mapping =
+		region.kind === "suburb" ? lookupSuburb(region.code) : undefined;
 	const activeGroup = view === "rental" ? mapping?.rental : mapping?.sales;
 	const groupLabel = activeGroup?.groupLabel ?? null;
 	const showGroupBadge =

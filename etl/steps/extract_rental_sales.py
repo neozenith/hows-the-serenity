@@ -6,17 +6,17 @@ schema mapping (`etl/rental_sales_schema.yaml`) lists each source xlsx
 file with its sheets, cell ranges, and per-sheet metadata (dwelling
 type, bedroom count, statistic columns). For each file we walk the
 configured sheets, cross-product the time-bucket columns with the
-geospatial-name rows, and emit one row per (suburb, time, dwelling
+geospatial-name rows, and emit one row per (region, time, dwelling
 type, bedrooms, statistic) cell.
 
-Differences from upstream
-- LGA-granularity entries are omitted from the YAML for now (the app
-  only renders suburb boundaries today). Skip with a log message if
-  encountered.
-- Reads SAL parquet from the path produced by our own `etl extract sal`
-  step rather than the upstream's pre-converted location.
-- Outputs straight to public/data/rental_sales.duckdb (where the
-  frontend reads from) plus a parquet checkpoint under data/converted/.
+Granularity tiers
+- "suburb" rows resolve geospatial names to SAL_CODE21 via the SAL parquet.
+- "lga" rows resolve to LGA_CODE24 via the LGA GeoJSON.
+Both tiers land in the same `rental_sales` table, distinguished by the
+`geospatial_type` column. The frontend dispatches on this when querying.
+
+Outputs straight to public/data/rental_sales.duckdb (where the frontend
+reads from) plus a parquet checkpoint under data/converted/.
 
 Special-case suburb-name remappings preserved verbatim from upstream
 because the source data uses inconsistent forms (Merri-bek's hyphen,
@@ -75,6 +75,29 @@ def _build_sal_lookup(sal_parquet: Path) -> dict[str, str]:
     }
 
 
+def _build_lga_lookup(lga_geojson: Path) -> dict[str, str]:
+    """Map lowercased LGA_NAME24 -> LGA_CODE24. Strips '(vic.)' suffix.
+
+    The source rental xlsx lists LGAs as e.g. "Banyule" but the GeoJSON
+    sometimes carries a state qualifier "(Vic.)" suffix on names that
+    appear in multiple states (e.g. "Bayside (Vic.)"). Strip those before
+    using as the lookup key, mirroring the SAL pattern.
+    """
+    if not lga_geojson.exists():
+        raise FileNotFoundError(
+            f"LGA GeoJSON not found at {lga_geojson}. It should ship with the boundary pipeline."
+        )
+    gdf = gpd.read_file(lga_geojson)
+    if "LGA_NAME24" not in gdf.columns or "LGA_CODE24" not in gdf.columns:
+        raise ValueError(
+            f"LGA GeoJSON missing LGA_NAME24 / LGA_CODE24 columns. Available: {list(gdf.columns)}"
+        )
+    return {
+        str(row["LGA_NAME24"]).lower().replace(" (vic.)", ""): str(row["LGA_CODE24"])
+        for _, row in gdf[["LGA_NAME24", "LGA_CODE24"]].iterrows()
+    }
+
+
 def _split_geo_value(geo_value: str) -> list[str]:
     """Split a hyphen-grouped geo name into its constituent lookup keys.
 
@@ -92,7 +115,7 @@ def _process_sheet(
     sheet: Worksheet,
     file_config: dict[str, Any],
     sheet_config: dict[str, Any],
-    sal_lookup: dict[str, str],
+    geo_lookup: dict[str, str],
 ) -> list[dict[str, Any]]:
     statistics = list(sheet_config["statistic"])
     time_bucket_format = file_config["time_bucket_format"]
@@ -116,7 +139,13 @@ def _process_sheet(
             continue
 
         geo_keys = _split_geo_value(str(geo_value))
-        geo_codes = [sal_lookup[k] for k in geo_keys if k in sal_lookup]
+        geo_codes = [geo_lookup[k] for k in geo_keys if k in geo_lookup]
+        # Drop rows whose names didn't resolve to any code — they can't
+        # be linked to a polygon, so the frontend can't render them. For
+        # LGA tier this skips ~67 regional Victorian LGAs that aren't
+        # in the metro-Melbourne `selected_lga_*.geojson` polygon set.
+        if not geo_codes:
+            continue
 
         for time_col in range(tb_start_col, tb_end_col + 1):
             time_value = sheet.cell(row=tb_start_row, column=time_col).value
@@ -159,7 +188,7 @@ def _process_sheet(
 def _process_file(
     file_path: Path,
     file_config: dict[str, Any],
-    sal_lookup: dict[str, str],
+    geo_lookup: dict[str, str],
 ) -> list[dict[str, Any]]:
     log.info("Processing file: %s", file_path.name)
     # NOT read_only — random `.cell(row, col)` access is O(N) per lookup in
@@ -176,7 +205,7 @@ def _process_file(
             log.debug("  No config for sheet %r, skipping", sheet_name)
             continue
         log.info("  Sheet: %s", sheet_name)
-        sheet_rows = _process_sheet(workbook[sheet_name], file_config, sheet_config, sal_lookup)
+        sheet_rows = _process_sheet(workbook[sheet_name], file_config, sheet_config, geo_lookup)
         log.info("    -> %d rows", len(sheet_rows))
         rows.extend(sheet_rows)
     workbook.close()
@@ -188,6 +217,7 @@ def run(
     input_dir: Path,
     schema_file: Path,
     sal_parquet: Path,
+    lga_geojson: Path,
     output_parquet: Path,
     output_duckdb: Path,
 ) -> int:
@@ -201,23 +231,34 @@ def run(
     sal_lookup = _build_sal_lookup(sal_parquet)
     log.info("  -> %d SAL entries", len(sal_lookup))
 
+    log.info("Loading LGA lookup from %s", lga_geojson)
+    lga_lookup = _build_lga_lookup(lga_geojson)
+    log.info("  -> %d LGA entries", len(lga_lookup))
+
+    # Dispatch the per-row name→code lookup based on the file's declared
+    # granularity. Anything else (e.g. "sa2", "postcode" should the schema
+    # ever grow) raises so we don't silently produce empty geospatial_codes.
+    lookups: dict[str, dict[str, str]] = {
+        "suburb": sal_lookup,
+        "lga": lga_lookup,
+    }
+
     log.info("Loading schema mapping: %s", schema_file)
     config = YAML(typ="safe").load(schema_file.read_text())
 
     all_rows: list[dict[str, Any]] = []
     for file_config in config:
-        if file_config["data_granularity"] != "suburb":
-            log.info(
-                "Skipping non-suburb-granularity file: %s (granularity=%r)",
-                file_config["file"],
-                file_config["data_granularity"],
+        granularity = file_config["data_granularity"]
+        if granularity not in lookups:
+            raise ValueError(
+                f"Unknown data_granularity {granularity!r} for "
+                f"{file_config['file']!r}. Add a lookup builder."
             )
-            continue
         file_path = input_dir / file_config["file"]
         if not file_path.exists():
             log.warning("Source file missing, skipping: %s", file_path)
             continue
-        all_rows.extend(_process_file(file_path, file_config, sal_lookup))
+        all_rows.extend(_process_file(file_path, file_config, lookups[granularity]))
 
     log.info("Total rows extracted: %d", len(all_rows))
     df = pd.DataFrame(all_rows)

@@ -1,13 +1,14 @@
 # Schema mapping for rental + sales Excel sources.
 #
 # Ported from upstream isochrones/scripts/rental_sales/extract_schema_mapping.yaml
-# (commit bdc2961, tag v2.1.0). LGA-granularity files are intentionally
-# OMITTED here — this app currently only renders suburb (SAL) boundaries
-# and the click->plot wiring keys on SAL_NAME21. Re-add LGA blocks when an
-# LGA boundary pipeline lands.
+# (commit bdc2961, tag v2.1.0).
 #
 # `file:` paths are relative to the input root passed at extract time
 # (defaults to data/originals/rental_sales/).
+#
+# Granularity tiers carried in `data_granularity` (becomes `geospatial_type`
+# in the output rows): "suburb" or "lga". Rental publishes both tiers from
+# VIC DTF; sales publishes suburb only.
 
 - file: 'rental/Moving annual median rent by suburb and town - March quarter 2025.xlsx'
   data_type: rental
@@ -96,3 +97,55 @@
       time_bucket_range: B2:L2
       statistic: [median]
       geospatial_range: A3:A218
+
+# LGA rental — same column-pair layout as the suburb file (count, median
+# alternating). Sheet titles use a different convention from the suburb
+# file ("1br Flat" vs "1 bedroom flat") so are listed independently.
+- file: 'rental/Quarterly median rents by Local Government Area - March quarter 2025.xlsx'
+  data_type: rental
+  data_frequency: quarterly
+  data_granularity: lga
+  time_bucket_format: '%b %Y'  # MMM YYYY
+  sheets:
+    - sheet: '1br Flat'
+      dwelling_type: unit
+      bedrooms: 1
+      time_bucket_range: C2:GZ2
+      statistic: [count, median]
+      geospatial_range: B4:B95
+    - sheet: '2br Flat'
+      dwelling_type: unit
+      bedrooms: 2
+      time_bucket_range: C2:GZ2
+      statistic: [count, median]
+      geospatial_range: B4:B95
+    - sheet: '3br Flat'
+      dwelling_type: unit
+      bedrooms: 3
+      time_bucket_range: C2:GZ2
+      statistic: [count, median]
+      geospatial_range: B4:B95
+    - sheet: '2br House'
+      dwelling_type: house
+      bedrooms: 2
+      time_bucket_range: C2:GZ2
+      statistic: [count, median]
+      geospatial_range: B4:B95
+    - sheet: '3br House'
+      dwelling_type: house
+      bedrooms: 3
+      time_bucket_range: C2:GZ2
+      statistic: [count, median]
+      geospatial_range: B4:B95
+    - sheet: '4br House'
+      dwelling_type: house
+      bedrooms: 4
+      time_bucket_range: C2:GZ2
+      statistic: [count, median]
+      geospatial_range: B4:B95
+    - sheet: 'All Properties'
+      dwelling_type: all
+      bedrooms: all
+      time_bucket_range: C2:GZ2
+      statistic: [count, median]
+      geospatial_range: B4:B95
