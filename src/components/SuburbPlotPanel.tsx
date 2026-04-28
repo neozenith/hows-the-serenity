@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import type { RegionSelection } from "@/lib/region";
 import type { RegionKind } from "@/lib/rental-sales-query";
 import { overlayThemeClass, useOverlayTheme } from "@/lib/theme";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -8,20 +9,6 @@ import { ErrorBoundary } from "./ErrorBoundary";
 // this the eager bundle gains ~700 KB. Wrapped in an ErrorBoundary so a
 // failed chunk load OR a Plotly render exception doesn't crash the App.
 const SuburbPlot = lazy(() => import("./SuburbPlot"));
-
-// Generic selection — covers both SAL suburbs and LGAs. The `kind`
-// discriminator drives the badge label and the rental-sales query.
-export type RegionSelection = {
-	kind: RegionKind;
-	name: string;
-	code: string;
-};
-
-// Backwards-compatible alias. Existing consumers (and the
-// `__htsSelectSuburb`/`__htsSelectRegion` test hooks) reference
-// `SuburbSelection` as the historical name; keep it pointing at the
-// generalized type so the rename ripples cleanly.
-export type SuburbSelection = RegionSelection;
 
 const KIND_BADGE: Record<RegionKind, string> = {
 	suburb: "SAL",

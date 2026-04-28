@@ -7,13 +7,13 @@ import {
 	useState,
 } from "react";
 import * as FactoryMod from "react-plotly.js/factory";
+import type { RegionSelection } from "@/lib/region";
 import {
 	queryRegionTimeSeries,
 	type SuburbTimeSeries,
 } from "@/lib/rental-sales-query";
 import { lookupSuburb } from "@/lib/suburb-mappings";
 import { type OverlayTheme, useOverlayTheme } from "@/lib/theme";
-import type { RegionSelection } from "./SuburbPlotPanel";
 
 // Plotly's full bundle is ~3 MB; cartesian-dist-min is ~700 KB and includes
 // the scatter/line traces we need. Pair with react-plotly.js via its factory
