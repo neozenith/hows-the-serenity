@@ -41,8 +41,7 @@ log = logging.getLogger("etl.steps.extract_cpi")
 # Stable ABS API endpoint. The dataflow ID `CPI` and dimension key form
 # are documented at https://api.data.abs.gov.au/rest/dataflow/ABS/CPI .
 _ABS_CPI_URL = (
-    "https://api.data.abs.gov.au/data/CPI/1.10001.10.2.Q"
-    "?startPeriod=1999-Q1&format=jsondata"
+    "https://api.data.abs.gov.au/data/CPI/1.10001.10.2.Q?startPeriod=1999-Q1&format=jsondata"
 )
 
 # ABS returns SDMX-JSON; we ask for `format=jsondata` which keeps the
