@@ -44,6 +44,9 @@ from etl.steps import (
     extract_sal,
     publish_commute_hulls,
     publish_lga,
+    publish_region_centroids,
+    publish_region_h3_cells,
+    publish_region_names,
     publish_sal,
     tile_isochrone,
     tile_ptv,
@@ -60,6 +63,12 @@ LGA_GEOJSON = PUBLIC_DATA_DIR / "selected_lga_2024_aust_gda2020.geojson"
 TILES_DIR = PUBLIC_DATA_DIR / "tiles"
 SAL_TILES_DIR = TILES_DIR / "suburbs"
 SUBURB_MAPPINGS_JSON = PUBLIC_DATA_DIR / "suburb_mappings.json"
+SUBURB_CENTROIDS_JSON = PUBLIC_DATA_DIR / "suburb_centroids.json"
+LGA_CENTROIDS_JSON = PUBLIC_DATA_DIR / "lga_centroids.json"
+SUBURB_H3_CELLS_JSON = PUBLIC_DATA_DIR / "suburb_h3_cells.json"
+LGA_H3_CELLS_JSON = PUBLIC_DATA_DIR / "lga_h3_cells.json"
+SUBURB_NAMES_JSON = PUBLIC_DATA_DIR / "suburb_names.json"
+LGA_NAMES_JSON = PUBLIC_DATA_DIR / "lga_names.json"
 
 ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
 ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
@@ -219,6 +228,36 @@ def cmd_publish_suburb_mappings(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_publish_region_centroids(args: argparse.Namespace) -> None:
+    publish_region_centroids.run(
+        sal_parquet=args.sal_parquet,
+        lga_geojson=args.lga_geojson,
+        suburb_output=args.suburb_output,
+        lga_output=args.lga_output,
+    )
+
+
+def cmd_publish_region_h3_cells(args: argparse.Namespace) -> None:
+    publish_region_h3_cells.run(
+        sal_parquet=args.sal_parquet,
+        lga_geojson=args.lga_geojson,
+        rental_sales_parquet=args.rental_sales_parquet,
+        sal_resolution=args.sal_resolution,
+        lga_resolution=args.lga_resolution,
+        suburb_output=args.suburb_output,
+        lga_output=args.lga_output,
+    )
+
+
+def cmd_publish_region_names(args: argparse.Namespace) -> None:
+    publish_region_names.run(
+        sal_parquet=args.sal_parquet,
+        lga_geojson=args.lga_geojson,
+        suburb_output=args.suburb_output,
+        lga_output=args.lga_output,
+    )
+
+
 def cmd_status(_: argparse.Namespace) -> None:
     rows: list[tuple[str, Path, str]] = [
         ("SAL zip (input)", SAL_ZIP, "file"),
@@ -238,6 +277,12 @@ def cmd_status(_: argparse.Namespace) -> None:
         *[(f"PTV stops {m} MVT tiles", _ptv_stops_tiles_dir(m), "dir") for m in PTV_MODES],
         ("Rental/sales DuckDB", RENTAL_SALES_DUCKDB, "file"),
         ("Suburb mappings JSON", SUBURB_MAPPINGS_JSON, "file"),
+        ("Suburb centroids JSON", SUBURB_CENTROIDS_JSON, "file"),
+        ("LGA centroids JSON", LGA_CENTROIDS_JSON, "file"),
+        ("Suburb H3 cells JSON", SUBURB_H3_CELLS_JSON, "file"),
+        ("LGA H3 cells JSON", LGA_H3_CELLS_JSON, "file"),
+        ("Suburb names JSON", SUBURB_NAMES_JSON, "file"),
+        ("LGA names JSON", LGA_NAMES_JSON, "file"),
     ]
     print(f"{'Artifact':<30}  {'Exists':<7}  {'Size':>10}  Path")
     print("-" * 100)
@@ -429,6 +474,121 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output JSON path",
     )
     suburb_mappings_publish.set_defaults(func=cmd_publish_suburb_mappings)
+
+    region_centroids_publish = publish_sub.add_parser(
+        "region-centroids",
+        help=(
+            "Publish per-region representative-point centroids "
+            "(SAL_CODE21 + LGA_CODE24 -> [lon, lat]) as JSON for the "
+            "frontend HexagonLayer."
+        ),
+    )
+    region_centroids_publish.add_argument(
+        "--sal-parquet",
+        type=Path,
+        default=SAL_PARQUET,
+        help="SAL parquet (state-filtered, produced by `etl extract sal`)",
+    )
+    region_centroids_publish.add_argument(
+        "--lga-geojson",
+        type=Path,
+        default=LGA_GEOJSON,
+        help="LGA GeoJSON (produced by `etl publish lga`)",
+    )
+    region_centroids_publish.add_argument(
+        "--suburb-output",
+        type=Path,
+        default=SUBURB_CENTROIDS_JSON,
+        help="Output JSON path for suburb centroids",
+    )
+    region_centroids_publish.add_argument(
+        "--lga-output",
+        type=Path,
+        default=LGA_CENTROIDS_JSON,
+        help="Output JSON path for LGA centroids",
+    )
+    region_centroids_publish.set_defaults(func=cmd_publish_region_centroids)
+
+    region_h3_publish = publish_sub.add_parser(
+        "region-h3-cells",
+        help=(
+            "Publish per-region H3 cell coverage maps (SAL_CODE21 + LGA_CODE24 "
+            "-> set of H3 cell IDs) for every region that has rental_sales "
+            "data. SAL and LGA tiers use independent resolutions because "
+            "LGA polygons are much larger and a uniform high resolution "
+            "would explode cell counts into the millions."
+        ),
+    )
+    region_h3_publish.add_argument(
+        "--sal-parquet",
+        type=Path,
+        default=SAL_PARQUET,
+        help="SAL parquet (state-filtered, produced by `etl extract sal`)",
+    )
+    region_h3_publish.add_argument(
+        "--lga-geojson",
+        type=Path,
+        default=LGA_GEOJSON,
+        help="LGA GeoJSON (produced by `etl publish lga`)",
+    )
+    region_h3_publish.add_argument(
+        "--rental-sales-parquet",
+        type=Path,
+        default=RENTAL_SALES_PARQUET,
+        help="rental_sales parquet (drives the has-data polygon filter)",
+    )
+    region_h3_publish.add_argument(
+        "--sal-resolution",
+        type=int,
+        default=publish_region_h3_cells.SAL_RESOLUTION_DEFAULT,
+        help="H3 resolution for SAL polygons; 9 ~= 400m (default)",
+    )
+    region_h3_publish.add_argument(
+        "--lga-resolution",
+        type=int,
+        default=publish_region_h3_cells.LGA_RESOLUTION_DEFAULT,
+        help="H3 resolution for LGA polygons; 7 ~= 1.2km (default)",
+    )
+    region_h3_publish.add_argument(
+        "--suburb-output",
+        type=Path,
+        default=SUBURB_H3_CELLS_JSON,
+        help="Output JSON path for suburb H3 cells",
+    )
+    region_h3_publish.add_argument(
+        "--lga-output",
+        type=Path,
+        default=LGA_H3_CELLS_JSON,
+        help="Output JSON path for LGA H3 cells",
+    )
+    region_h3_publish.set_defaults(func=cmd_publish_region_h3_cells)
+
+    region_names_publish = publish_sub.add_parser(
+        "region-names",
+        help=(
+            "Publish per-region name lookups (SAL_CODE21 -> SAL_NAME21, "
+            "LGA_CODE24 -> LGA_NAME24) for hex-overlay tooltips."
+        ),
+    )
+    region_names_publish.add_argument(
+        "--sal-parquet", type=Path, default=SAL_PARQUET, help="SAL parquet"
+    )
+    region_names_publish.add_argument(
+        "--lga-geojson", type=Path, default=LGA_GEOJSON, help="LGA GeoJSON"
+    )
+    region_names_publish.add_argument(
+        "--suburb-output",
+        type=Path,
+        default=SUBURB_NAMES_JSON,
+        help="Output JSON path for suburb names",
+    )
+    region_names_publish.add_argument(
+        "--lga-output",
+        type=Path,
+        default=LGA_NAMES_JSON,
+        help="Output JSON path for LGA names",
+    )
+    region_names_publish.set_defaults(func=cmd_publish_region_names)
 
     # `etl tile <source>`
     tile_p = top_sub.add_parser("tile", help="Tile intermediate Parquet to MVT XYZ tiles")

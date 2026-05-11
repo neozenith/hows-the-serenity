@@ -1,4 +1,5 @@
 import { PathStyleExtension } from "@deck.gl/extensions";
+import { H3HexagonLayer } from "@deck.gl/geo-layers";
 import {
 	GeoJsonLayer,
 	type Layer,
@@ -7,6 +8,10 @@ import {
 	TextLayer,
 	TileLayer,
 } from "deck.gl";
+import type { RentalSeriesValues } from "@/hooks/useLatestRentalSeries";
+import type { RegionH3Cells } from "@/hooks/useRegionH3Cells";
+import type { NameLookup, RegionNames } from "@/hooks/useRegionNames";
+import type { RentalHexSeries } from "@/lib/rental-hex-series";
 import type { RegionSelection } from "./region";
 import { type LoadedManifest, makeGatedTileFetch } from "./tile-manifest";
 import { recordTileLoad, recordTileUnload } from "./tile-stats";
@@ -169,6 +174,19 @@ type TileGridSpec = {
 	hint: string;
 };
 
+// Aggregation overlay for rental/sales latest-value data. Single LayerSpec
+// for visibility, but the rendered HexagonLayer is parameterised at build
+// time by the currently-active series (from useActiveHexSeries) — only
+// one series renders at a time. Default off; user picks a series in the
+// control panel.
+type HexagonSeriesSpec = {
+	kind: "hexagonSeries";
+	key: "rentalHex";
+	layerId: "rental-hex";
+	label: string;
+	hint: string;
+};
+
 export type LayerSpec =
 	| CommuteHullSpec
 	| LgaSpec
@@ -176,16 +194,17 @@ export type LayerSpec =
 	| PtvLineSpec
 	| PtvStopsSpec
 	| SalSpec
-	| TileGridSpec;
+	| TileGridSpec
+	| HexagonSeriesSpec;
 
 export type LayerKey = LayerSpec["key"];
 
-// Tile-backed keys (everything except static GeoJSON layers and the
-// synthetic debug grid). MVT-only concerns like manifest loading
-// discriminate on this narrower type.
+// Tile-backed keys (everything except static GeoJSON layers, the
+// synthetic debug grid, and the aggregation hexagon overlay). MVT-only
+// concerns like manifest loading discriminate on this narrower type.
 export type TileLayerKey = Exclude<
 	LayerKey,
-	"lga" | "commuteTrain" | "commuteTram" | "tileGrid"
+	"lga" | "commuteTrain" | "commuteTram" | "tileGrid" | "rentalHex"
 >;
 
 export type LayerVisibility = Record<LayerKey, boolean>;
@@ -314,6 +333,16 @@ const SPECS: readonly LayerSpec[] = [
 		hint: "ABS SAL 2021",
 		dir: "suburbs",
 	},
+	// Aggregation hex overlay — rendered just before the debug grid so
+	// it sits above boundary/transit context but below the developer
+	// overlay. Off by default; needs a series selection to render.
+	{
+		kind: "hexagonSeries",
+		key: "rentalHex",
+		layerId: "rental-hex",
+		label: "Rental/Sales hex",
+		hint: "Latest median per series, binned at 1km",
+	},
 	// Last in render order so the grid + labels sit above every other
 	// layer. Off by default — see INITIAL_VISIBILITY override below.
 	{
@@ -328,6 +357,12 @@ const SPECS: readonly LayerSpec[] = [
 // UI-side ordering for the layer-toggle list. Differs from render order
 // (which is geometry-driven, see catalogue note above) — the panel groups
 // region polygons first, then walkability, then transit, then commute hulls.
+// NOTE: "rentalHex" is intentionally absent. The hex overlay is controlled
+// exclusively by the top-of-screen series picker — a panel checkbox would
+// duplicate that control and let the layer be "on" with no series picked
+// (or vice versa). Keeping it out of LAYER_DISPLAY_DEFS hides it from the
+// panel while still leaving it in LayerKey / LayerVisibility for the
+// always-on internal toggle that `buildLayers` reads.
 const DISPLAY_ORDER: readonly LayerKey[] = [
 	"lga",
 	"suburbs",
@@ -380,6 +415,10 @@ export const LAYER_DIRS: Record<TileLayerKey, string> = SPECS.reduce(
 // without fighting for attention. Toggle off via the controls panel as
 // needed. The tile-grid debug overlay defaults off so it never clutters
 // normal use — turn it on via its checkbox when reporting bugs.
+// rentalHex stays *on* in the visibility map at all times — the picker
+// controls whether it renders by setting activeHexSeriesId. Defaulting
+// it off would require the user to flip a hidden checkbox just to make
+// their picker selection visible.
 const DEFAULT_OFF: ReadonlySet<LayerKey> = new Set<LayerKey>(["tileGrid"]);
 export const INITIAL_VISIBILITY: LayerVisibility = SPECS.reduce((acc, s) => {
 	acc[s.key] = !DEFAULT_OFF.has(s.key);
@@ -766,10 +805,140 @@ const makeTileGridLayer = (visible: boolean): Layer =>
 		},
 	});
 
+// --- Rental/Sales hex overlay -----------------------------------------------
+//
+// H3HexagonLayer: one coloured cell per pre-computed H3 region cell, joined
+// against the active series' latest-value-per-region map. Produces a
+// "pixelated map fill" effect where every cell inside a suburb gets that
+// suburb's value, giving the impression of the suburb polygon hex-rasterised
+// at H3 resolution 9 (~400m diameter cells).
+//
+// Pre-computing the per-cell colour at build-layers time (rather than via
+// a `getFillColor` callback) means deck.gl just memcpy's the colour buffer —
+// no per-cell JS callback overhead during the WebGL upload.
+
+// Six-stop perceptual colour ramp (Viridis-ish — sequential, colourblind-
+// safe). Per-cell colour is linearly interpolated between adjacent stops
+// based on the cell's value position within the series' [min, max] domain.
+const HEX_COLOR_RANGE: ReadonlyArray<[number, number, number]> = [
+	[68, 1, 84],
+	[71, 44, 122],
+	[59, 81, 139],
+	[44, 113, 142],
+	[33, 144, 141],
+	[39, 173, 129],
+];
+
+const sampleRamp = (
+	value: number,
+	min: number,
+	max: number,
+): [number, number, number] => {
+	if (max <= min) return [...HEX_COLOR_RANGE[0]] as [number, number, number];
+	const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+	const lastIdx = HEX_COLOR_RANGE.length - 1;
+	const pos = t * lastIdx;
+	const lo = Math.floor(pos);
+	const hi = Math.min(lastIdx, lo + 1);
+	const f = pos - lo;
+	const a = HEX_COLOR_RANGE[lo];
+	const b = HEX_COLOR_RANGE[hi];
+	return [
+		Math.round(a[0] * (1 - f) + b[0] * f),
+		Math.round(a[1] * (1 - f) + b[1] * f),
+		Math.round(a[2] * (1 - f) + b[2] * f),
+	];
+};
+
+// One datum per visible H3 cell. Carries every field the tooltip needs
+// so picking is a single object lookup with no follow-up joins. Pre-
+// computed colour means deck.gl doesn't have to call back into JS during
+// the WebGL upload.
+export type H3HexDatum = {
+	hexagon: string;
+	regionCode: string;
+	regionName: string;
+	value: number;
+	date: Date;
+	color: [number, number, number];
+	// Series ref carried so the tooltip can show dwelling + bedrooms
+	// without a secondary lookup. Same object reference is shared across
+	// all cells in the active series — cheap.
+	series: RentalHexSeries;
+};
+
+const buildHexData = (
+	seriesValues: RentalSeriesValues,
+	cells: ReadonlyMap<string, string>,
+	names: NameLookup,
+	valueFilter: readonly [number, number] | null,
+): H3HexDatum[] => {
+	const out: H3HexDatum[] = [];
+	const series = seriesValues.series;
+	for (const [cellId, code] of cells) {
+		const latest = seriesValues.byCode.get(code);
+		if (latest === undefined) continue;
+		if (
+			valueFilter !== null &&
+			(latest.value < valueFilter[0] || latest.value > valueFilter[1])
+		)
+			continue;
+		out.push({
+			hexagon: cellId,
+			regionCode: code,
+			// Names file may be slow to load or genuinely missing for some
+			// codes (boundary edge cases) — fall back to the code so the
+			// tooltip still shows something rather than "undefined".
+			regionName: names.get(code) ?? code,
+			value: latest.value,
+			date: latest.date,
+			color: sampleRamp(
+				latest.value,
+				seriesValues.valueMin,
+				seriesValues.valueMax,
+			),
+			series,
+		});
+	}
+	return out;
+};
+
+const makeH3HexSeriesLayer = (
+	seriesValues: RentalSeriesValues,
+	cells: ReadonlyMap<string, string>,
+	names: NameLookup,
+	valueFilter: readonly [number, number] | null,
+	visible: boolean,
+): Layer | null => {
+	const data = buildHexData(seriesValues, cells, names, valueFilter);
+	if (data.length === 0) return null;
+	return new H3HexagonLayer<H3HexDatum>({
+		id: `rental-hex-${seriesValues.series.id}`,
+		data,
+		visible,
+		// Pickable so the hover tooltip can show the full per-cell detail.
+		// pickToTooltip recognises this layer's datum shape via the
+		// `hexagon` property.
+		pickable: true,
+		getHexagon: (d) => d.hexagon,
+		getFillColor: (d) => d.color,
+		extruded: false,
+		filled: true,
+		stroked: false,
+		opacity: 0.65,
+		highPrecision: "auto",
+	});
+};
+
 export type BuildLayersInput = {
 	visible: LayerVisibility;
 	manifests: Manifests;
 	onRegionClick: (selection: RegionSelection) => void;
+	activeHexSeriesId: string | null;
+	hexSeriesValues: ReadonlyMap<string, RentalSeriesValues>;
+	h3Cells: RegionH3Cells;
+	regionNames: RegionNames;
+	hexValueFilter: readonly [number, number] | null;
 };
 
 // Walk the catalogue in render order; produce one deck.gl Layer per spec, or
@@ -781,6 +950,11 @@ export const buildLayers = ({
 	visible,
 	manifests,
 	onRegionClick,
+	activeHexSeriesId,
+	hexSeriesValues,
+	h3Cells,
+	regionNames,
+	hexValueFilter,
 }: BuildLayersInput): Layer[] =>
 	SPECS.flatMap<Layer>((spec) => {
 		switch (spec.kind) {
@@ -811,6 +985,23 @@ export const buildLayers = ({
 			}
 			case "tileGrid":
 				return [makeTileGridLayer(visible[spec.key])];
+			case "hexagonSeries": {
+				if (!activeHexSeriesId) return [];
+				const seriesValues = hexSeriesValues.get(activeHexSeriesId);
+				if (!seriesValues) return [];
+				const tier = seriesValues.series.regionTier;
+				const cells = tier === "suburb" ? h3Cells.suburb : h3Cells.lga;
+				if (cells.size === 0) return [];
+				const names = tier === "suburb" ? regionNames.suburb : regionNames.lga;
+				const layer = makeH3HexSeriesLayer(
+					seriesValues,
+					cells,
+					names,
+					hexValueFilter,
+					visible[spec.key],
+				);
+				return layer ? [layer] : [];
+			}
 			default: {
 				// Compile-time exhaustiveness check: TS errors here if a new
 				// spec.kind is introduced without a matching case.
@@ -820,14 +1011,65 @@ export const buildLayers = ({
 		}
 	});
 
+// Rental values are weekly $; sales values are absolute $. Different
+// magnitudes warrant different formatting — `$540 /wk` vs `$1,250,000`.
+const formatHexValue = (
+	value: number,
+	dataType: "rental" | "sales",
+): string => {
+	if (dataType === "rental") {
+		return `$${Math.round(value).toLocaleString("en-AU")} /wk`;
+	}
+	return `$${Math.round(value).toLocaleString("en-AU")}`;
+};
+
+// Single shared formatter — much cheaper than constructing a new
+// Intl.DateTimeFormat per tooltip invocation.
+const HEX_DATE_FMT = new Intl.DateTimeFormat("en-AU", {
+	month: "short",
+	year: "numeric",
+});
+
+const formatDwelling = (dwellingType: string, bedrooms: string): string => {
+	const dwellingLabel: Record<string, string> = {
+		house: "House",
+		unit: "Unit",
+		vacant_land: "Vacant land",
+		all: "All dwellings",
+	};
+	const d = dwellingLabel[dwellingType] ?? dwellingType;
+	// "All / all" and vacant-land's "0" carry no bedroom info worth showing.
+	if (bedrooms === "all" || bedrooms === "0") return d;
+	return `${d} · ${bedrooms}-bed`;
+};
+
 // Hover tooltip — DeckGL invokes for any pickable layer's hovered feature and
 // handles positioning. Returning null hides; an object surfaces text+style.
-// We branch on which property shape was picked because the layers (PTV stops
-// vs SAL suburbs vs LGAs) carry different fields.
+// We branch on which property shape was picked because the layers carry
+// different fields: MVT-backed layers expose GeoJSON properties on the
+// picked object, while the H3 hex overlay puts our typed datum directly
+// on `info.object` (no `.properties` wrapper).
 export const pickToTooltip = (info: {
-	object?: { properties?: Record<string, unknown> } | null;
+	object?: { properties?: Record<string, unknown> } | H3HexDatum | null;
 }): { text: string } | null => {
-	const props = info.object?.properties;
+	const obj = info.object;
+	if (!obj) return null;
+	// H3 hex overlay datum — recognise by the shape we control. Full
+	// granular detail per the picker's "show me what this represents"
+	// contract: region name + code, value (formatted by data type),
+	// dwelling + bedrooms, date the value was recorded, H3 cell id.
+	if ("hexagon" in obj && typeof obj.hexagon === "string") {
+		const tierLabel = obj.series.regionTier === "suburb" ? "SAL" : "LGA";
+		const lines = [
+			`${obj.regionName} (${tierLabel} ${obj.regionCode})`,
+			formatHexValue(obj.value, obj.series.dataType),
+			formatDwelling(obj.series.dwellingType, obj.series.bedrooms),
+			`As of ${HEX_DATE_FMT.format(obj.date)}`,
+			`H3 ${obj.hexagon}`,
+		];
+		return { text: lines.join("\n") };
+	}
+	const props = "properties" in obj ? obj.properties : undefined;
 	if (!props) return null;
 	if (typeof props.STOP_NAME === "string") {
 		const mode = typeof props.MODE === "string" ? props.MODE : "";

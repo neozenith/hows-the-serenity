@@ -1,11 +1,16 @@
 import { DeckGL, type MapViewState } from "deck.gl";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import { ControlPanel } from "@/components/ControlPanel";
+import { HexSeriesPicker } from "@/components/HexSeriesPicker";
 import { SuburbPlotPanel } from "@/components/SuburbPlotPanel";
 import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
+import { useActiveHexSeries } from "@/hooks/useActiveHexSeries";
 import { useDuckDb } from "@/hooks/useDuckDb";
+import { useLatestRentalSeries } from "@/hooks/useLatestRentalSeries";
 import { useLayerVisibility } from "@/hooks/useLayerVisibility";
+import { useRegionH3Cells } from "@/hooks/useRegionH3Cells";
+import { useRegionNames } from "@/hooks/useRegionNames";
 import { useRegionSelection } from "@/hooks/useRegionSelection";
 import { useSuburbMappings } from "@/hooks/useSuburbMappings";
 import { useTileManifests } from "@/hooks/useTileManifests";
@@ -32,6 +37,30 @@ const INITIAL_VIEW_STATE: MapViewState = {
 const App = () => {
 	const status = useDuckDb();
 	const manifests = useTileManifests();
+	const h3Cells = useRegionH3Cells();
+	const regionNames = useRegionNames();
+	const hexSeriesValues = useLatestRentalSeries(status);
+	const { activeId: activeHexSeriesId, select: selectHexSeries } =
+		useActiveHexSeries();
+	// Filter resets to null (= no filter, show full range) whenever the
+	// active series changes. Different series have wildly different
+	// magnitudes ($300/wk rental vs $1.5M sales), so a carried-over filter
+	// from another series would be meaningless. We compare prev vs current
+	// inside the effect (rather than just listing the dep) so Biome's
+	// useExhaustiveDependencies rule doesn't autofix it away as unread.
+	const [hexValueFilter, setHexValueFilter] = useState<
+		readonly [number, number] | null
+	>(null);
+	const prevHexSeriesIdRef = useRef<string | null>(activeHexSeriesId);
+	useEffect(() => {
+		if (prevHexSeriesIdRef.current !== activeHexSeriesId) {
+			prevHexSeriesIdRef.current = activeHexSeriesId;
+			setHexValueFilter(null);
+		}
+	}, [activeHexSeriesId]);
+	const activeSeriesValues = activeHexSeriesId
+		? (hexSeriesValues.get(activeHexSeriesId) ?? null)
+		: null;
 	const { visible, toggle, reset: resetVisibility } = useLayerVisibility();
 	const { selection, setSelection } = useRegionSelection();
 	useSuburbMappings();
@@ -46,8 +75,27 @@ const App = () => {
 	// array. Rebuilds only when visibility, manifests, or the selection setter
 	// identity actually change (the latter is stable from useState).
 	const layers = useMemo(
-		() => buildLayers({ visible, manifests, onRegionClick: setSelection }),
-		[visible, manifests, setSelection],
+		() =>
+			buildLayers({
+				visible,
+				manifests,
+				onRegionClick: setSelection,
+				activeHexSeriesId,
+				hexSeriesValues,
+				h3Cells,
+				regionNames,
+				hexValueFilter,
+			}),
+		[
+			visible,
+			manifests,
+			setSelection,
+			activeHexSeriesId,
+			hexSeriesValues,
+			h3Cells,
+			regionNames,
+			hexValueFilter,
+		],
 	);
 
 	return (
@@ -75,6 +123,13 @@ const App = () => {
 				onResetVisibility={resetVisibility}
 				zoomLabelRef={zoomLabelRef}
 				initialZoom={INITIAL_VIEW_STATE.zoom}
+			/>
+			<HexSeriesPicker
+				activeId={activeHexSeriesId}
+				onSelect={selectHexSeries}
+				activeSeriesValues={activeSeriesValues}
+				valueFilter={hexValueFilter}
+				onValueFilterChange={setHexValueFilter}
 			/>
 			<TileMemoryOverlay />
 			<SuburbPlotPanel
