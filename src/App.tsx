@@ -32,7 +32,7 @@ const INITIAL_VIEW_STATE: MapViewState = {
 const App = () => {
 	const status = useDuckDb();
 	const manifests = useTileManifests();
-	const { visible, toggle } = useLayerVisibility();
+	const { visible, toggle, reset: resetVisibility } = useLayerVisibility();
 	const { selection, setSelection } = useRegionSelection();
 	useSuburbMappings();
 
@@ -72,6 +72,7 @@ const App = () => {
 				status={status}
 				visible={visible}
 				onToggle={toggle}
+				onResetVisibility={resetVisibility}
 				zoomLabelRef={zoomLabelRef}
 				initialZoom={INITIAL_VIEW_STATE.zoom}
 			/>

@@ -1,5 +1,5 @@
 import { PathStyleExtension } from "@deck.gl/extensions";
-import { GeoJsonLayer, type Layer, MVTLayer } from "deck.gl";
+import { GeoJsonLayer, type Layer, MVTLayer, TextLayer } from "deck.gl";
 import type { RegionSelection } from "./region";
 import { type LoadedManifest, makeGatedTileFetch } from "./tile-manifest";
 import { recordTileLoad, recordTileUnload } from "./tile-stats";
@@ -95,6 +95,8 @@ type CommuteHullSpec = {
 	hint: string;
 	url: string;
 	baseColor: RGB;
+	// Lowercase token used in the on-contour text label (e.g. "train 15m").
+	modeShort: string;
 };
 
 type LgaSpec = {
@@ -177,6 +179,7 @@ const SPECS: readonly LayerSpec[] = [
 		hint: "15/30/45/60-min from Southern Cross",
 		url: COMMUTE_HULLS_TRAIN_URL,
 		baseColor: TRAIN_COLOR,
+		modeShort: "train",
 	},
 	{
 		kind: "commuteHull",
@@ -186,6 +189,7 @@ const SPECS: readonly LayerSpec[] = [
 		hint: "15/30/45/60-min from Southern Cross",
 		url: COMMUTE_HULLS_TRAM_URL,
 		baseColor: TRAM_COLOR,
+		modeShort: "tram",
 	},
 	// LGA polygons — clickable for LGA-tier rental data. Drawn under SAL so
 	// when both layers are on, SAL (last in the catalogue) wins click
@@ -383,6 +387,112 @@ const makeCommuteHullLayer = (s: CommuteHullSpec, visible: boolean): Layer =>
 		extensions: [new PathStyleExtension({ dash: true })],
 	});
 
+// --- Commute-hull contour labels --------------------------------------------
+//
+// One on-map text label per hull tier (e.g. "train 30m"). The label sits at
+// the easternmost vertex of the hull's exterior ring — a deterministic anchor
+// that has two nice properties: (1) nested hulls grow eastward, so the four
+// tier labels stack as a roughly vertical ladder on the right of the map
+// rather than collapsing onto one point; (2) anchoring on the line means the
+// label rides the contour like a topo-map elevation tag instead of sitting
+// in dead space inside the polygon.
+
+type HullLabel = {
+	position: [number, number];
+	text: string;
+};
+
+type HullFeature = {
+	geometry?: { type?: string; coordinates?: unknown };
+	properties?: {
+		MODE?: string;
+		transit_time_minutes_nearest_tier?: number;
+	};
+};
+
+const labelFromFeature = (
+	f: HullFeature,
+	modeShort: string,
+): HullLabel | null => {
+	if (f.geometry?.type !== "Polygon") return null;
+	const ring = (f.geometry.coordinates as number[][][] | undefined)?.[0];
+	if (!ring || ring.length === 0) return null;
+	const tier = f.properties?.transit_time_minutes_nearest_tier;
+	if (typeof tier !== "number") return null;
+
+	// Easternmost vertex of the exterior ring — see header comment for why.
+	let maxLon = Number.NEGATIVE_INFINITY;
+	let anchor: [number, number] | null = null;
+	for (const v of ring) {
+		const lon = v[0];
+		const lat = v[1];
+		if (lon === undefined || lat === undefined) continue;
+		if (lon > maxLon) {
+			maxLon = lon;
+			anchor = [lon, lat];
+		}
+	}
+	if (!anchor) return null;
+
+	return {
+		position: anchor,
+		text: `${modeShort} ${Math.round(tier)}m`,
+	};
+};
+
+// Module-scoped Promise cache so `buildLayers` re-running (every visibility
+// toggle, every manifest load) doesn't fire a new fetch each time. Deck.gl
+// compares `data` by identity, so handing back the same Promise reference
+// also skips re-parsing on the layer side.
+const hullLabelCache = new Map<string, Promise<HullLabel[]>>();
+const getHullLabels = (
+	url: string,
+	modeShort: string,
+): Promise<HullLabel[]> => {
+	let p = hullLabelCache.get(url);
+	if (!p) {
+		p = (async () => {
+			const res = await fetch(url);
+			if (!res.ok) {
+				throw new Error(`failed to fetch hull labels ${url}: ${res.status}`);
+			}
+			const fc = (await res.json()) as { features?: HullFeature[] };
+			return (fc.features ?? [])
+				.map((f) => labelFromFeature(f, modeShort))
+				.filter((x): x is HullLabel => x !== null);
+		})();
+		hullLabelCache.set(url, p);
+	}
+	return p;
+};
+
+const makeCommuteHullLabelLayer = (
+	s: CommuteHullSpec,
+	visible: boolean,
+): Layer =>
+	new TextLayer<HullLabel>({
+		id: `${s.layerId}-labels`,
+		data: getHullLabels(s.url, s.modeShort),
+		visible,
+		pickable: false,
+		getPosition: (d: HullLabel) => d.position,
+		getText: (d: HullLabel) => d.text,
+		getColor: [...s.baseColor, 240] as [number, number, number, number],
+		getSize: 11,
+		sizeUnits: "pixels",
+		// Anchor sits on the eastern edge of the hull → flow text outward to
+		// the right so the label doesn't overlap the contour line itself.
+		getTextAnchor: "start",
+		getAlignmentBaseline: "center",
+		// Small pixel gap between the anchor vertex and the start of the text
+		// so the contour stroke and the glyphs don't visually fuse.
+		getPixelOffset: [4, 0],
+		fontFamily:
+			"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+		fontWeight: 700,
+		background: false,
+	});
+
 const makeLgaLayer = (
 	s: LgaSpec,
 	visible: boolean,
@@ -567,7 +677,10 @@ export const buildLayers = ({
 	SPECS.flatMap<Layer>((spec) => {
 		switch (spec.kind) {
 			case "commuteHull":
-				return [makeCommuteHullLayer(spec, visible[spec.key])];
+				return [
+					makeCommuteHullLayer(spec, visible[spec.key]),
+					makeCommuteHullLabelLayer(spec, visible[spec.key]),
+				];
 			case "lga":
 				return [makeLgaLayer(spec, visible[spec.key], onRegionClick)];
 			case "iso": {
