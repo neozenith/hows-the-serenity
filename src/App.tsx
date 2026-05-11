@@ -37,7 +37,12 @@ const INITIAL_VIEW_STATE: MapViewState = {
 const App = () => {
 	const status = useDuckDb();
 	const manifests = useTileManifests();
-	const { visible, toggle, reset: resetVisibility } = useLayerVisibility();
+	const {
+		visible,
+		toggle,
+		reset: resetVisibility,
+		setAll: setAllVisibility,
+	} = useLayerVisibility();
 	// Hex layer is a memory-heavy feature — gate the H3 cell fetch on the
 	// panel toggle so disabling it actually releases the ~3 MB cell data.
 	const hexEnabled = visible.rentalHex;
@@ -144,6 +149,7 @@ const App = () => {
 				visible={visible}
 				onToggle={toggle}
 				onResetVisibility={resetVisibility}
+				onSetAllVisibility={setAllVisibility}
 				zoomLabelRef={zoomLabelRef}
 				initialZoom={INITIAL_VIEW_STATE.zoom}
 			/>

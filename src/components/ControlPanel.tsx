@@ -19,6 +19,7 @@ export const ControlPanel = ({
 	visible,
 	onToggle,
 	onResetVisibility,
+	onSetAllVisibility,
 	zoomLabelRef,
 	initialZoom,
 }: {
@@ -26,6 +27,7 @@ export const ControlPanel = ({
 	visible: LayerVisibility;
 	onToggle: (key: LayerKey) => void;
 	onResetVisibility: () => void;
+	onSetAllVisibility: (value: boolean) => void;
 	zoomLabelRef: RefObject<HTMLSpanElement | null>;
 	initialZoom: number;
 }) => {
@@ -102,19 +104,35 @@ export const ControlPanel = ({
 							<h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
 								Layers
 							</h2>
-							{/* Wipes the sessionStorage entry and snaps back to the
-								built-in defaults — useful when isolating layers for
-								testing and you want a clean slate without hunting
-								through DevTools. */}
-							<button
-								type="button"
-								onClick={onResetVisibility}
-								aria-label="Reset layer visibility to defaults"
-								title="Reset to defaults"
-								className="cursor-pointer rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-							>
-								Reset
-							</button>
+							<div className="flex items-center gap-1">
+								{/* All off — symmetric counterpart to Reset. Useful when
+									you want a clean isolation slate, e.g. for testing one
+									layer in isolation, without manually unticking each
+									checkbox. State persists to sessionStorage like any
+									other change. */}
+								<button
+									type="button"
+									onClick={() => onSetAllVisibility(false)}
+									aria-label="Turn off every layer"
+									title="All off"
+									className="cursor-pointer rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+								>
+									All off
+								</button>
+								{/* Wipes the sessionStorage entry and snaps back to the
+									built-in defaults — effectively "all on" given the
+									current INITIAL_VISIBILITY (every layer defaults to on
+									except tileGrid). */}
+								<button
+									type="button"
+									onClick={onResetVisibility}
+									aria-label="Reset layer visibility to defaults"
+									title="Reset to defaults"
+									className="cursor-pointer rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+								>
+									Reset
+								</button>
+							</div>
 						</div>
 						<ul className="space-y-1.5">
 							{LAYER_DISPLAY_DEFS.map((layer) => (

@@ -79,5 +79,19 @@ export const useLayerVisibility = () => {
 		setVisible(INITIAL_VISIBILITY);
 	}, []);
 
-	return { visible, toggle, reset };
+	// Bulk toggle: snap every layer's visibility to a single value. The
+	// auto-persist effect (deps [visible]) saves the new state, same as
+	// any other mutation. Used by the "All off" affordance in the panel
+	// — the symmetric counterpart to Reset (which is effectively "all
+	// on" given the current INITIAL_VISIBILITY defaults).
+	const setAll = useCallback((value: boolean) => {
+		setVisible(
+			(prev) =>
+				Object.fromEntries(
+					Object.keys(prev).map((k) => [k, value]),
+				) as LayerVisibility,
+		);
+	}, []);
+
+	return { visible, toggle, reset, setAll };
 };
