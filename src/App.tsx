@@ -37,7 +37,11 @@ const INITIAL_VIEW_STATE: MapViewState = {
 const App = () => {
 	const status = useDuckDb();
 	const manifests = useTileManifests();
-	const h3Cells = useRegionH3Cells();
+	const { visible, toggle, reset: resetVisibility } = useLayerVisibility();
+	// Hex layer is a memory-heavy feature — gate the H3 cell fetch on the
+	// panel toggle so disabling it actually releases the ~3 MB cell data.
+	const hexEnabled = visible.rentalHex;
+	const h3Cells = useRegionH3Cells(hexEnabled);
 	const regionNames = useRegionNames();
 	const hexSeriesValues = useLatestRentalSeries(status);
 	const { activeId: activeHexSeriesId, select: selectHexSeries } =
@@ -79,7 +83,6 @@ const App = () => {
 	const activeSeriesValues = activeHexSeriesId
 		? (hexSeriesValues.get(activeHexSeriesId) ?? null)
 		: null;
-	const { visible, toggle, reset: resetVisibility } = useLayerVisibility();
 	const { selection, setSelection } = useRegionSelection();
 	useSuburbMappings();
 
@@ -144,15 +147,17 @@ const App = () => {
 				zoomLabelRef={zoomLabelRef}
 				initialZoom={INITIAL_VIEW_STATE.zoom}
 			/>
-			<HexSeriesPicker
-				activeId={activeHexSeriesId}
-				onSelect={selectHexSeries}
-				activeSeriesValues={activeSeriesValues}
-				valueFilter={hexValueFilter}
-				onValueFilterChange={setHexValueFilter}
-				threeD={hex3D}
-				onThreeDChange={setHex3D}
-			/>
+			{hexEnabled && (
+				<HexSeriesPicker
+					activeId={activeHexSeriesId}
+					onSelect={selectHexSeries}
+					activeSeriesValues={activeSeriesValues}
+					valueFilter={hexValueFilter}
+					onValueFilterChange={setHexValueFilter}
+					threeD={hex3D}
+					onThreeDChange={setHex3D}
+				/>
+			)}
 			<TileMemoryOverlay />
 			<SuburbPlotPanel
 				selection={selection}

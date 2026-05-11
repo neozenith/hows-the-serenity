@@ -335,13 +335,16 @@ const SPECS: readonly LayerSpec[] = [
 	},
 	// Aggregation hex overlay — rendered just before the debug grid so
 	// it sits above boundary/transit context but below the developer
-	// overlay. Off by default; needs a series selection to render.
+	// overlay. ON by default but a kill-switch in the Layers panel:
+	// turning it off skips the ~3 MB H3 cell JSON fetch entirely, not
+	// just the WebGL render. Which series renders is controlled by the
+	// top-of-screen picker, which hides itself when this toggle is off.
 	{
 		kind: "hexagonSeries",
 		key: "rentalHex",
 		layerId: "rental-hex",
 		label: "Rental/Sales hex",
-		hint: "Latest median per series, binned at 1km",
+		hint: "H3 pixelated fill · picker controls series",
 	},
 	// Last in render order so the grid + labels sit above every other
 	// layer. Off by default — see INITIAL_VISIBILITY override below.
@@ -357,12 +360,12 @@ const SPECS: readonly LayerSpec[] = [
 // UI-side ordering for the layer-toggle list. Differs from render order
 // (which is geometry-driven, see catalogue note above) — the panel groups
 // region polygons first, then walkability, then transit, then commute hulls.
-// NOTE: "rentalHex" is intentionally absent. The hex overlay is controlled
-// exclusively by the top-of-screen series picker — a panel checkbox would
-// duplicate that control and let the layer be "on" with no series picked
-// (or vice versa). Keeping it out of LAYER_DISPLAY_DEFS hides it from the
-// panel while still leaving it in LayerKey / LayerVisibility for the
-// always-on internal toggle that `buildLayers` reads.
+// "rentalHex" is in the panel as a top-level toggle — turning it off skips
+// the H3 cell JSON fetch entirely, not just the render, so users on
+// memory-constrained machines can disable the ~3 MB of in-memory cells
+// without losing the rest of the app. The top-of-screen series picker
+// hides itself when the toggle is off, so there's no "select a series
+// but nothing renders" dead state.
 const DISPLAY_ORDER: readonly LayerKey[] = [
 	"lga",
 	"suburbs",
@@ -376,6 +379,7 @@ const DISPLAY_ORDER: readonly LayerKey[] = [
 	"regionalTrainStops",
 	"commuteTrain",
 	"commuteTram",
+	"rentalHex",
 	// Debug overlay last so it sits at the bottom of the toggle list.
 	"tileGrid",
 ];

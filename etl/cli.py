@@ -10,7 +10,10 @@ Follows .claude/rules/python/cli.md:
 from __future__ import annotations
 
 import argparse
+import logging
+import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -256,6 +259,105 @@ def cmd_publish_region_names(args: argparse.Namespace) -> None:
         suburb_output=args.suburb_output,
         lga_output=args.lga_output,
     )
+
+
+# --- `etl all` orchestration -------------------------------------------------
+#
+# The full pipeline as a flat, ordered list of subcommand argv tuples. Each
+# tuple becomes a fresh `python -m etl <args>` subprocess so the OS reclaims
+# memory between steps — peak RSS for the whole pipeline is bounded to the
+# worst single step, instead of accumulating across the run. Per-step memory
+# budgets are still each step's responsibility (see publish_region_h3_cells
+# for an example of streaming + GC); subprocess isolation is the second
+# defence so even a buggy step can't leak into later ones.
+#
+# Order is dependency-driven: extract feeds publish + tile, publish-lga is
+# read by extract-rental-sales' downstream consumers, publish-region-h3-cells
+# depends on the rental_sales parquet already existing, etc.
+PIPELINE_STEPS: tuple[tuple[str, ...], ...] = (
+    # --- extract phase ---
+    ("extract", "sal"),
+    ("extract", "rental-sales"),
+    ("extract", "isochrones"),
+    *tuple(("extract", "ptv-lines", "--mode", m) for m in PTV_MODES),
+    *tuple(("extract", "ptv-stops", "--mode", m) for m in PTV_MODES),
+    # --- publish phase ---
+    ("publish", "sal"),
+    ("publish", "lga"),
+    *tuple(("publish", "commute-hulls", "--mode", m) for m in ("metro_train", "metro_tram")),
+    ("publish", "suburb-mappings"),
+    ("publish", "region-h3-cells"),
+    ("publish", "region-names"),
+    ("publish", "region-centroids"),
+    # --- tile phase ---
+    ("tile", "sal"),
+    *tuple(("tile", "isochrone", "--duration", str(d)) for d in ISOCHRONE_DURATIONS),
+    *tuple(("tile", "ptv-lines", "--mode", m) for m in PTV_MODES),
+    *tuple(("tile", "ptv-stops", "--mode", m) for m in PTV_MODES),
+)
+
+
+def cmd_all(args: argparse.Namespace) -> None:
+    """Run the full pipeline as a sequence of subprocesses.
+
+    Subprocess isolation per step means each step starts with a fresh
+    Python heap — peak memory for the whole run is bounded to the worst
+    single step's transient peak, not the cumulative sum. The user's
+    laptop crash on a prior monolithic-bash run is precisely the failure
+    mode this guards against.
+
+    Stops on the first non-zero exit. The failing step's stdout/stderr
+    is inherited (already streamed live), so the user sees exactly what
+    went wrong and where in the sequence.
+    """
+    log = logging.getLogger("etl.cli.all")
+    verbose: bool = bool(getattr(args, "verbose", False))
+    only_phase: str | None = getattr(args, "only", None)
+
+    steps = [s for s in PIPELINE_STEPS if only_phase is None or s[0] == only_phase]
+    if not steps:
+        log.error("No steps match --only=%r (expected one of: extract, publish, tile)", only_phase)
+        raise SystemExit(2)
+
+    total = len(steps)
+    log.info(
+        "Running %d pipeline step%s sequentially (subprocess-isolated)",
+        total,
+        "" if total == 1 else "s",
+    )
+    overall_start = time.monotonic()
+
+    for idx, step in enumerate(steps, start=1):
+        # `python -m etl` re-enters the same CLI we're in now, so the
+        # child's argparse sees the same handlers we just defined. The
+        # verbose flag is forwarded so the child logs at the same level.
+        argv = [sys.executable, "-m", "etl"]
+        if verbose:
+            argv.append("--verbose")
+        argv.extend(step)
+
+        label = " ".join(step)
+        log.info("[%d/%d] etl %s", idx, total, label)
+        step_start = time.monotonic()
+        # check=False so we can format our own error message and exit
+        # with the child's exit code rather than wrapping it in a
+        # CalledProcessError stack trace.
+        result = subprocess.run(argv, check=False)
+        elapsed = time.monotonic() - step_start
+        if result.returncode != 0:
+            log.error(
+                "[%d/%d] FAILED in %.1fs: etl %s (exit %d)",
+                idx,
+                total,
+                elapsed,
+                label,
+                result.returncode,
+            )
+            raise SystemExit(result.returncode)
+        log.info("[%d/%d] OK in %.1fs: etl %s", idx, total, elapsed, label)
+
+    overall_elapsed = time.monotonic() - overall_start
+    log.info("All %d steps completed in %.1fs", total, overall_elapsed)
 
 
 def cmd_status(_: argparse.Namespace) -> None:
@@ -638,6 +740,23 @@ def build_parser() -> argparse.ArgumentParser:
     ptv_stops_tile = tile_sub.add_parser("ptv-stops", help="Tile PTV stop parquet to MVT XYZ tiles")
     ptv_stops_tile.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
     ptv_stops_tile.set_defaults(func=cmd_tile_ptv_stops)
+
+    # `etl all`
+    all_p = top_sub.add_parser(
+        "all",
+        help=(
+            "Run the full pipeline end-to-end. Each step executes in its own "
+            "subprocess so memory is reclaimed between steps — peak RSS is "
+            "bounded to the worst single step rather than the cumulative sum."
+        ),
+    )
+    all_p.add_argument(
+        "--only",
+        choices=("extract", "publish", "tile"),
+        default=None,
+        help="Limit to one phase (default: run all three).",
+    )
+    all_p.set_defaults(func=cmd_all)
 
     # `etl status`
     status_p = top_sub.add_parser("status", help="Show current state of pipeline artifacts")

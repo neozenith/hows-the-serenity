@@ -200,7 +200,19 @@ etl-publish: install-py ## Publish full SAL parquet -> single GeoJSON (legacy / 
 etl-status: install-py ## Show pipeline artifact status
 	$(ETL_RUN) status
 
-data: etl-extract etl-tile etl-extract-iso etl-tile-iso etl-extract-ptv etl-tile-ptv ## Build all geospatial outputs
+etl-all: install-py ## Run the full ETL pipeline (subprocess-isolated per step; bounded RAM)
+	$(ETL_RUN) all
+
+etl-all-extract: install-py ## Run just the extract phase of the full ETL
+	$(ETL_RUN) all --only extract
+
+etl-all-publish: install-py ## Run just the publish phase of the full ETL
+	$(ETL_RUN) all --only publish
+
+etl-all-tile: install-py ## Run just the tile phase of the full ETL
+	$(ETL_RUN) all --only tile
+
+data: etl-extract etl-tile etl-extract-iso etl-tile-iso etl-extract-ptv etl-tile-ptv ## Build all geospatial outputs (legacy aggregator — see etl-all)
 
 # =============================================================================
 # Port Management
