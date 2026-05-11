@@ -1,5 +1,12 @@
 import { PathStyleExtension } from "@deck.gl/extensions";
-import { GeoJsonLayer, type Layer, MVTLayer, TextLayer } from "deck.gl";
+import {
+	GeoJsonLayer,
+	type Layer,
+	MVTLayer,
+	PathLayer,
+	TextLayer,
+	TileLayer,
+} from "deck.gl";
 import type { RegionSelection } from "./region";
 import { type LoadedManifest, makeGatedTileFetch } from "./tile-manifest";
 import { recordTileLoad, recordTileUnload } from "./tile-stats";
@@ -150,21 +157,35 @@ type SalSpec = {
 	dir: string;
 };
 
+// Debug overlay: a TileLayer that doesn't fetch anything — it just uses
+// Deck.GL's tile-coord math to draw the boundary box and "z/x/y" label
+// for every tile visible at the current zoom. Toggleable via the layer
+// panel; off by default so it never clutters normal use.
+type TileGridSpec = {
+	kind: "tileGrid";
+	key: "tileGrid";
+	layerId: "tile-grid-debug";
+	label: string;
+	hint: string;
+};
+
 export type LayerSpec =
 	| CommuteHullSpec
 	| LgaSpec
 	| IsoSpec
 	| PtvLineSpec
 	| PtvStopsSpec
-	| SalSpec;
+	| SalSpec
+	| TileGridSpec;
 
 export type LayerKey = LayerSpec["key"];
 
-// Tile-backed keys (everything except static GeoJSON layers). MVT-only
-// concerns like manifest loading discriminate on this narrower type.
+// Tile-backed keys (everything except static GeoJSON layers and the
+// synthetic debug grid). MVT-only concerns like manifest loading
+// discriminate on this narrower type.
 export type TileLayerKey = Exclude<
 	LayerKey,
-	"lga" | "commuteTrain" | "commuteTram"
+	"lga" | "commuteTrain" | "commuteTram" | "tileGrid"
 >;
 
 export type LayerVisibility = Record<LayerKey, boolean>;
@@ -293,6 +314,15 @@ const SPECS: readonly LayerSpec[] = [
 		hint: "ABS SAL 2021",
 		dir: "suburbs",
 	},
+	// Last in render order so the grid + labels sit above every other
+	// layer. Off by default — see INITIAL_VISIBILITY override below.
+	{
+		kind: "tileGrid",
+		key: "tileGrid",
+		layerId: "tile-grid-debug",
+		label: "Tile grid (debug)",
+		hint: "Tile boundaries + z/x/y labels",
+	},
 ];
 
 // UI-side ordering for the layer-toggle list. Differs from render order
@@ -311,6 +341,8 @@ const DISPLAY_ORDER: readonly LayerKey[] = [
 	"regionalTrainStops",
 	"commuteTrain",
 	"commuteTram",
+	// Debug overlay last so it sits at the bottom of the toggle list.
+	"tileGrid",
 ];
 
 const SPEC_BY_KEY = SPECS.reduce(
@@ -341,12 +373,16 @@ export const LAYER_DIRS: Record<TileLayerKey, string> = SPECS.reduce(
 	{} as Record<TileLayerKey, string>,
 );
 
-// Default visibility: every layer on. Each is sufficiently subtle on its own
-// (LGA + SAL outline-only with 5% fill, walkability 10% fill + dotted stroke,
-// transit lines + stops, commute hulls dashed) that they layer cleanly without
-// fighting for attention. Toggle off via the controls panel as needed.
+// Default visibility: every layer on except the debug-only tile grid.
+// Each non-debug layer is sufficiently subtle on its own (LGA + SAL
+// outline-only with 5% fill, walkability 10% fill + dotted stroke,
+// transit lines + stops, commute hulls dashed) that they layer cleanly
+// without fighting for attention. Toggle off via the controls panel as
+// needed. The tile-grid debug overlay defaults off so it never clutters
+// normal use — turn it on via its checkbox when reporting bugs.
+const DEFAULT_OFF: ReadonlySet<LayerKey> = new Set<LayerKey>(["tileGrid"]);
 export const INITIAL_VISIBILITY: LayerVisibility = SPECS.reduce((acc, s) => {
-	acc[s.key] = true;
+	acc[s.key] = !DEFAULT_OFF.has(s.key);
 	return acc;
 }, {} as LayerVisibility);
 
@@ -658,6 +694,78 @@ const makeSalLayer = (
 		...tileLifecycle(s.layerId),
 	});
 
+// --- Tile-coord debug overlay -----------------------------------------------
+//
+// A TileLayer with `getTileData: () => null` — we don't fetch anything, we
+// just piggyback on Deck.GL's tile-coord math to know which (z,x,y) cells
+// are in view at the current zoom. For each one, renderSubLayers emits a
+// PathLayer for the boundary box and a TextLayer with the "z/x/y" string
+// centred in the cell.
+//
+// `tile.boundingBox` is documented as [[west, south], [east, north]] in
+// EPSG:4326 — same coord system as every other layer in this file.
+
+type TileGridDatum = { position: [number, number]; text: string };
+
+type TileSubLayerProps = {
+	id: string;
+	tile: {
+		index: { x: number; y: number; z: number };
+		boundingBox: [[number, number], [number, number]];
+	};
+};
+
+const makeTileGridLayer = (visible: boolean): Layer =>
+	new TileLayer({
+		id: "tile-grid-debug",
+		visible,
+		pickable: false,
+		minZoom: 0,
+		maxZoom: 22,
+		// No data fetch — we only want Deck.GL to do the tile-coord math.
+		getTileData: () => null,
+		renderSubLayers: (props: unknown) => {
+			const { id, tile } = props as TileSubLayerProps;
+			const [[west, south], [east, north]] = tile.boundingBox;
+			const { x, y, z } = tile.index;
+			const center: [number, number] = [(west + east) / 2, (south + north) / 2];
+			const ring: [number, number][] = [
+				[west, south],
+				[east, south],
+				[east, north],
+				[west, north],
+				[west, south],
+			];
+			return [
+				new PathLayer<[number, number][]>({
+					id: `${id}-outline`,
+					data: [ring],
+					getPath: (d) => d,
+					getColor: [255, 200, 0, 200],
+					getWidth: 1,
+					widthUnits: "pixels",
+					widthMinPixels: 1,
+				}),
+				new TextLayer<TileGridDatum>({
+					id: `${id}-label`,
+					data: [{ position: center, text: `${z}/${x}/${y}` }],
+					getPosition: (d) => d.position,
+					getText: (d) => d.text,
+					getColor: [255, 220, 80, 240],
+					getSize: 12,
+					sizeUnits: "pixels",
+					getTextAnchor: "middle",
+					getAlignmentBaseline: "center",
+					fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+					fontWeight: 700,
+					background: true,
+					getBackgroundColor: [0, 0, 0, 180],
+					backgroundPadding: [4, 2, 4, 2],
+				}),
+			];
+		},
+	});
+
 export type BuildLayersInput = {
 	visible: LayerVisibility;
 	manifests: Manifests;
@@ -701,6 +809,8 @@ export const buildLayers = ({
 					? [makeSalLayer(spec, m, visible[spec.key], onRegionClick)]
 					: [];
 			}
+			case "tileGrid":
+				return [makeTileGridLayer(visible[spec.key])];
 			default: {
 				// Compile-time exhaustiveness check: TS errors here if a new
 				// spec.kind is introduced without a matching case.

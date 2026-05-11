@@ -8,7 +8,6 @@ from typing import Any
 
 import geopandas as gpd
 import mapbox_vector_tile as mvt
-from mapbox_vector_tile.encoder import on_invalid_geometry_make_valid
 from shapely.geometry import box
 
 from etl.tiling.coords import TileBounds
@@ -75,12 +74,37 @@ def encode_tile(
     if not features:
         return None
 
+    # No `on_invalid_geometry` callback: mapbox_vector_tile's `make_valid`
+    # callback silently empties certain MultiPolygons whose components were
+    # individually valid pre-clip but became "invalid" (duplicate vertices,
+    # sliver self-intersections) during the encoder's internal clip to
+    # `quantize_bounds`. The callback's repair returns an empty geometry
+    # for the whole feature, and the encoder writes an 18-byte stub
+    # envelope (valid layer, no features). That stub then gets rendered
+    # as garbled fragments by Deck.GL's MVTLayer, AND because Deck.GL
+    # upscales the maxZoom tile into every deeper zoom, one bad stub at
+    # z=maxZoom propagates visible breakage across z12..z20.
+    #
+    # Our inputs are guaranteed valid by shapely (we call
+    # `.intersection(tile_bbox)` on validated source data), so we don't
+    # need the library's after-the-fact repair pass. Letting the encoder
+    # use its default no-op invalid-geometry handler preserves the actual
+    # clipped geometry — including the post-clip topology artefacts,
+    # which Deck.GL renders without complaint.
     encoded: bytes = mvt.encode(
         [{"name": layer_name, "features": features}],
         default_options={
             "quantize_bounds": (tile.minx, tile.miny, tile.maxx, tile.maxy),
             "extents": MVT_EXTENT,
-            "on_invalid_geometry": on_invalid_geometry_make_valid,
         },
     )
+
+    # Defensive: a feature-empty output would still be a valid MVT envelope
+    # (~18-byte stub for layer_name="isochrone"), and the manifest writer
+    # records the coord as having data. Re-decode and skip the tile entirely
+    # if no features survived — protects against any future encoder quirk
+    # we haven't characterised yet.
+    decoded = mvt.decode(encoded)
+    if not any(layer.get("features") for layer in decoded.values()):
+        return None
     return encoded
