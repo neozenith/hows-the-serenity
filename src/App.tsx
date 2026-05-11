@@ -58,6 +58,24 @@ const App = () => {
 			setHexValueFilter(null);
 		}
 	}, [activeHexSeriesId]);
+
+	// 3D extrusion of the hex layer, height proportional to value. Persisted
+	// in sessionStorage so a refresh keeps the user's preference within a
+	// tab. Same pattern as useActiveHexSeries / useLayerVisibility.
+	const [hex3D, setHex3D] = useState<boolean>(() => {
+		try {
+			return window.sessionStorage.getItem("hts:hex-3d:v1") === "true";
+		} catch {
+			return false;
+		}
+	});
+	useEffect(() => {
+		try {
+			window.sessionStorage.setItem("hts:hex-3d:v1", String(hex3D));
+		} catch (e) {
+			console.warn("hex-3d: sessionStorage write failed", e);
+		}
+	}, [hex3D]);
 	const activeSeriesValues = activeHexSeriesId
 		? (hexSeriesValues.get(activeHexSeriesId) ?? null)
 		: null;
@@ -85,6 +103,7 @@ const App = () => {
 				h3Cells,
 				regionNames,
 				hexValueFilter,
+				hex3D,
 			}),
 		[
 			visible,
@@ -95,6 +114,7 @@ const App = () => {
 			h3Cells,
 			regionNames,
 			hexValueFilter,
+			hex3D,
 		],
 	);
 
@@ -130,6 +150,8 @@ const App = () => {
 				activeSeriesValues={activeSeriesValues}
 				valueFilter={hexValueFilter}
 				onValueFilterChange={setHexValueFilter}
+				threeD={hex3D}
+				onThreeDChange={setHex3D}
 			/>
 			<TileMemoryOverlay />
 			<SuburbPlotPanel

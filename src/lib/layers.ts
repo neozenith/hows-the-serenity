@@ -852,8 +852,10 @@ const sampleRamp = (
 
 // One datum per visible H3 cell. Carries every field the tooltip needs
 // so picking is a single object lookup with no follow-up joins. Pre-
-// computed colour means deck.gl doesn't have to call back into JS during
-// the WebGL upload.
+// computed colour AND elevation means deck.gl doesn't have to call back
+// into JS during the WebGL upload — the cost lives in `buildHexData`
+// instead, which only runs when the active series / filter / 3D mode
+// changes.
 export type H3HexDatum = {
 	hexagon: string;
 	regionCode: string;
@@ -861,11 +863,18 @@ export type H3HexDatum = {
 	value: number;
 	date: Date;
 	color: [number, number, number];
-	// Series ref carried so the tooltip can show dwelling + bedrooms
-	// without a secondary lookup. Same object reference is shared across
-	// all cells in the active series — cheap.
+	// Pre-normalised elevation in metres. Strict proportionality from
+	// zero — a cell with value = half of series max gets half the max
+	// elevation. Always computed; only used when the layer is in
+	// `extruded: true` mode, otherwise deck.gl ignores `getElevation`.
+	elevation: number;
 	series: RentalHexSeries;
 };
+
+// Max extrusion in metres. Big enough to be visible at metro zooms
+// (~z=10) once the user tilts the camera, small enough to not turn the
+// CBD into the Twin Towers from outer space.
+const HEX_MAX_ELEVATION_M = 5000;
 
 const buildHexData = (
 	seriesValues: RentalSeriesValues,
@@ -875,6 +884,12 @@ const buildHexData = (
 ): H3HexDatum[] => {
 	const out: H3HexDatum[] = [];
 	const series = seriesValues.series;
+	// Anchor elevation against the series' max so the tallest cell in the
+	// series reaches HEX_MAX_ELEVATION_M and everything else scales
+	// proportionally from zero. A 0/0 guard avoids NaN when a series has
+	// a single repeated value (max === 0 only happens if max === min === 0,
+	// which would still divide cleanly to 0).
+	const elevationDenom = seriesValues.valueMax > 0 ? seriesValues.valueMax : 1;
 	for (const [cellId, code] of cells) {
 		const latest = seriesValues.byCode.get(code);
 		if (latest === undefined) continue;
@@ -897,6 +912,7 @@ const buildHexData = (
 				seriesValues.valueMin,
 				seriesValues.valueMax,
 			),
+			elevation: (latest.value / elevationDenom) * HEX_MAX_ELEVATION_M,
 			series,
 		});
 	}
@@ -908,6 +924,8 @@ const makeH3HexSeriesLayer = (
 	cells: ReadonlyMap<string, string>,
 	names: NameLookup,
 	valueFilter: readonly [number, number] | null,
+	extruded: boolean,
+	onRegionClick: (selection: RegionSelection) => void,
 	visible: boolean,
 ): Layer | null => {
 	const data = buildHexData(seriesValues, cells, names, valueFilter);
@@ -916,16 +934,35 @@ const makeH3HexSeriesLayer = (
 		id: `rental-hex-${seriesValues.series.id}`,
 		data,
 		visible,
-		// Pickable so the hover tooltip can show the full per-cell detail.
-		// pickToTooltip recognises this layer's datum shape via the
-		// `hexagon` property.
+		// Pickable so hovers can show the tooltip *and* clicks can open the
+		// suburb/LGA detail panel. The H3 layer is rendered AFTER the SAL
+		// layer in the catalogue, so its onClick wins precedence inside
+		// any hex footprint when active — clicking outside any hex falls
+		// through to the underlying SAL/LGA layer as before.
 		pickable: true,
+		onClick: (info) => {
+			const obj = info.object as H3HexDatum | undefined;
+			if (!obj) return;
+			onRegionClick({
+				kind: obj.series.regionTier,
+				name: obj.regionName,
+				code: obj.regionCode,
+			});
+		},
 		getHexagon: (d) => d.hexagon,
 		getFillColor: (d) => d.color,
-		extruded: false,
+		getElevation: (d) => d.elevation,
+		extruded,
 		filled: true,
 		stroked: false,
-		opacity: 0.65,
+		// Uniform 60% across 2D and 3D. In 3D this lets the basemap read
+		// through tilted side faces; in 2D it lets underlying SAL / LGA
+		// boundaries stay visible. Bump back to a per-mode split if 3D
+		// side-faces feel too washed-out.
+		opacity: 0.6,
+		// Material defaults are fine — deck.gl applies basic Lambertian
+		// shading when `extruded: true` so taller cells have visible side
+		// shading without us configuring lighting explicitly.
 		highPrecision: "auto",
 	});
 };
@@ -939,6 +976,7 @@ export type BuildLayersInput = {
 	h3Cells: RegionH3Cells;
 	regionNames: RegionNames;
 	hexValueFilter: readonly [number, number] | null;
+	hex3D: boolean;
 };
 
 // Walk the catalogue in render order; produce one deck.gl Layer per spec, or
@@ -955,6 +993,7 @@ export const buildLayers = ({
 	h3Cells,
 	regionNames,
 	hexValueFilter,
+	hex3D,
 }: BuildLayersInput): Layer[] =>
 	SPECS.flatMap<Layer>((spec) => {
 		switch (spec.kind) {
@@ -998,6 +1037,8 @@ export const buildLayers = ({
 					cells,
 					names,
 					hexValueFilter,
+					hex3D,
+					onRegionClick,
 					visible[spec.key],
 				);
 				return layer ? [layer] : [];

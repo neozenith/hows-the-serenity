@@ -86,12 +86,16 @@ export const HexSeriesPicker = ({
 	activeSeriesValues,
 	valueFilter,
 	onValueFilterChange,
+	threeD,
+	onThreeDChange,
 }: {
 	activeId: string | null;
 	onSelect: (id: string | null) => void;
 	activeSeriesValues: RentalSeriesValues | null;
 	valueFilter: readonly [number, number] | null;
 	onValueFilterChange: (range: readonly [number, number] | null) => void;
+	threeD: boolean;
+	onThreeDChange: (next: boolean) => void;
 }) => {
 	const { theme } = useOverlayTheme();
 
@@ -261,15 +265,29 @@ export const HexSeriesPicker = ({
 					)}
 				</select>
 				{activeId !== null && (
-					<button
-						type="button"
-						onClick={() => onSelect(null)}
-						aria-label="Clear hex selection"
-						title="Clear"
-						className="cursor-pointer rounded px-1.5 py-0.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-					>
-						×
-					</button>
+					<>
+						<label
+							className="ml-1 flex cursor-pointer items-center gap-1 text-neutral-600 dark:text-neutral-400"
+							title="Extrude hexes by value. Right-drag to tilt the camera and see the heights."
+						>
+							<input
+								type="checkbox"
+								className="h-3.5 w-3.5 cursor-pointer accent-neutral-700 dark:accent-neutral-300"
+								checked={threeD}
+								onChange={(e) => onThreeDChange(e.target.checked)}
+							/>
+							3D
+						</label>
+						<button
+							type="button"
+							onClick={() => onSelect(null)}
+							aria-label="Clear hex selection"
+							title="Clear"
+							className="cursor-pointer rounded px-1.5 py-0.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+						>
+							×
+						</button>
+					</>
 				)}
 			</div>
 			{/* Value-range row. Two stacked range inputs share the series' full
