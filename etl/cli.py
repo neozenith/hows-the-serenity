@@ -41,6 +41,7 @@ from etl.config import (
 from etl.logging_setup import configure
 from etl.steps import (
     build_suburb_mappings,
+    extract_cpi,
     extract_isochrones,
     extract_ptv,
     extract_rental_sales,
@@ -74,6 +75,7 @@ LGA_H3_CELLS_JSON = PUBLIC_DATA_DIR / "lga_h3_cells.json"
 SUBURB_NAMES_JSON = PUBLIC_DATA_DIR / "suburb_names.json"
 LGA_NAMES_JSON = PUBLIC_DATA_DIR / "lga_names.json"
 DATA_VERSION_JSON = PUBLIC_DATA_DIR / "version.json"
+CPI_PARQUET = CONVERTED_DIR / "cpi_melbourne.parquet"
 
 ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
 ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
@@ -225,6 +227,13 @@ def cmd_extract_rental_sales(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_extract_cpi(args: argparse.Namespace) -> None:
+    extract_cpi.run(
+        output_parquet=args.output_parquet,
+        output_duckdb=args.output_duckdb,
+    )
+
+
 def cmd_publish_suburb_mappings(args: argparse.Namespace) -> None:
     build_suburb_mappings.build_suburb_mappings(
         sal_parquet=args.sal_parquet,
@@ -284,6 +293,9 @@ PIPELINE_STEPS: tuple[tuple[str, ...], ...] = (
     # --- extract phase ---
     ("extract", "sal"),
     ("extract", "rental-sales"),
+    # CPI attaches a new table inside the rental_sales.duckdb created by
+    # the rental-sales extract — it must come after, never before.
+    ("extract", "cpi"),
     ("extract", "isochrones"),
     *tuple(("extract", "ptv-lines", "--mode", m) for m in PTV_MODES),
     *tuple(("extract", "ptv-stops", "--mode", m) for m in PTV_MODES),
@@ -388,6 +400,7 @@ def cmd_status(_: argparse.Namespace) -> None:
         *[(f"PTV lines {m} MVT tiles", _ptv_lines_tiles_dir(m), "dir") for m in PTV_MODES],
         *[(f"PTV stops {m} MVT tiles", _ptv_stops_tiles_dir(m), "dir") for m in PTV_MODES],
         ("Rental/sales DuckDB", RENTAL_SALES_DUCKDB, "file"),
+        ("CPI parquet (Melbourne)", CPI_PARQUET, "file"),
         ("Suburb mappings JSON", SUBURB_MAPPINGS_JSON, "file"),
         ("Suburb centroids JSON", SUBURB_CENTROIDS_JSON, "file"),
         ("LGA centroids JSON", LGA_CENTROIDS_JSON, "file"),
@@ -489,6 +502,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output DuckDB file (consumed by the frontend)",
     )
     rental_sales_extract.set_defaults(func=cmd_extract_rental_sales)
+
+    cpi_extract = extract_sub.add_parser(
+        "cpi",
+        help=(
+            "Fetch ABS Melbourne All-groups CPI quarterly index via the SDMX-JSON "
+            "API; write parquet + attach as `cpi` table to rental_sales.duckdb"
+        ),
+    )
+    cpi_extract.add_argument(
+        "--output-parquet",
+        type=Path,
+        default=CPI_PARQUET,
+        help="Output parquet checkpoint",
+    )
+    cpi_extract.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="DuckDB to attach the `cpi` table into (must already exist)",
+    )
+    cpi_extract.set_defaults(func=cmd_extract_cpi)
 
     iso_extract = extract_sub.add_parser(
         "isochrones",

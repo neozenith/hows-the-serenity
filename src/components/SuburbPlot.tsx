@@ -9,6 +9,8 @@ import {
 import * as FactoryMod from "react-plotly.js/factory";
 import type { RegionSelection } from "@/lib/region";
 import {
+	type CpiPoint,
+	queryCpiSeries,
 	queryRegionTimeSeries,
 	type SuburbTimeSeries,
 } from "@/lib/rental-sales-query";
@@ -104,6 +106,39 @@ const buildTraces = (subset: SuburbTimeSeries[]) =>
 		name: traceLabel(s),
 	}));
 
+// CPI is region-independent — share a single cached promise across every
+// SuburbPlot mount. Reusing the same Date objects across mounts also lets
+// Plotly's deep-compare bail out on re-render when only the rental/sales
+// series changed.
+let _cpiPromise: Promise<CpiPoint[]> | null = null;
+const getCpi = (): Promise<CpiPoint[]> => {
+	if (!_cpiPromise) _cpiPromise = queryCpiSeries();
+	return _cpiPromise;
+};
+
+// CPI trace for the secondary y-axis. Drawn as a dashed grey line so it
+// reads as "reference / context" rather than competing with the primary
+// price traces for visual weight. `yaxis: "y2"` binds the series to the
+// right-side axis configured in the plot layout below.
+const buildCpiTrace = (cpi: ReadonlyArray<CpiPoint>, isDark: boolean) => ({
+	x: cpi.map((p) => p.ts),
+	y: cpi.map((p) => p.index),
+	type: "scatter" as const,
+	mode: "lines" as const,
+	name: "Melbourne CPI",
+	yaxis: "y2" as const,
+	line: {
+		color: isDark ? "rgb(163 163 163)" : "rgb(115 115 115)", // neutral-400 / 500
+		width: 1.5,
+		dash: "dash" as const,
+	},
+	// Match the rental/sales traces' default hover content: date + value.
+	// `%{x|%b %Y}` uses plotly's d3-time formatting → "Sep 2025" to
+	// match the rental data's natural quarterly label. <extra/> hides
+	// the trailing trace-name box plotly otherwise appends.
+	hovertemplate: "%{x|%b %Y}<br>CPI %{y:.1f}<extra></extra>",
+});
+
 // Default react-lazy export — App imports this via lazy() so the entire
 // plotly+series chunk only loads on the first suburb click.
 // Identified by SAL_CODE21 (numeric, stable) rather than name (mixed case
@@ -126,6 +161,7 @@ const plotlyTheme = (theme: OverlayTheme) => {
 
 export default function SuburbPlot({ region }: { region: RegionSelection }) {
 	const [series, setSeries] = useState<SuburbTimeSeries[] | null>(null);
+	const [cpi, setCpi] = useState<CpiPoint[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [view, setView] = useState<View>("rental");
 	const { theme } = useOverlayTheme();
@@ -139,6 +175,17 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 				setError(err instanceof Error ? err.message : String(err));
 			});
 	}, [region.kind, region.code]);
+
+	// CPI is region-independent and module-cached — fetched once per
+	// session. Failure is non-fatal: the chart degrades to single-axis if
+	// CPI doesn't land (e.g. older DuckDB without the cpi table).
+	useEffect(() => {
+		getCpi()
+			.then(setCpi)
+			.catch((err: unknown) => {
+				console.warn("CPI load failed:", err);
+			});
+	}, []);
 
 	// Partition once per data load. `useMemo` because the partition feeds
 	// directly into Plotly's `data` prop, which deep-compares for re-render.
@@ -187,7 +234,14 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 	}
 
 	const activeSeries = view === "rental" ? rental : sales;
-	const traces = buildTraces(activeSeries);
+	const dataTraces = buildTraces(activeSeries);
+	// Append the CPI overlay if loaded. Going at the end keeps it as the
+	// last legend entry, below the rental/sales series — visually it
+	// reads as a "reference annotation" rather than primary data.
+	const traces =
+		cpi && cpi.length > 0
+			? [...dataTraces, buildCpiTrace(cpi, theme === "dark")]
+			: dataTraces;
 	const yTitle =
 		view === "rental" ? "Median weekly rent (AUD)" : "Median sale price (AUD)";
 
@@ -243,7 +297,9 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 						// the longest trace label ("All dwellings", "House · 4 br")
 						// plus the swatch. Bottom margin shrinks now that the legend
 						// is no longer eating that band.
-						margin: { l: 56, r: 150, t: 8, b: 32 },
+						// Right margin sized to fit the secondary CPI axis (ticks +
+						// title ~50px) plus the legend (~150px) without overlap.
+						margin: { l: 56, r: 200, t: 8, b: 32 },
 						showlegend: true,
 						// Vertical legend pinned to the right of the plot area.
 						// `x: 1.02` puts it just outside the chart's right edge;
@@ -252,7 +308,10 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 						// make a 2-entry "Sales" view look detached at mid-height).
 						legend: {
 							orientation: "v",
-							x: 1.02,
+							// Pushed further right to clear the secondary y-axis
+							// ticks + "CPI (2023-24 = 100)" title sitting against the
+							// plot area's right edge.
+							x: 1.18,
 							xanchor: "left",
 							y: 1,
 							yanchor: "top",
@@ -269,6 +328,19 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 							title: { text: yTitle, standoff: 8 },
 							gridcolor: plotlyTheme(theme).gridcolor,
 							zerolinecolor: plotlyTheme(theme).zerolinecolor,
+						},
+						// Secondary axis bound to the CPI trace via `yaxis: "y2"`.
+						// `overlaying: "y"` shares the chart area; `side: "right"`
+						// puts ticks on the opposite edge. No `rangemode: tozero`
+						// here — CPI is bounded ~47 → ~102 and forcing zero would
+						// crush its visual range against the bottom of the chart.
+						yaxis2: {
+							overlaying: "y",
+							side: "right",
+							title: { text: "CPI (2023-24 = 100)", standoff: 8 },
+							showgrid: false,
+							tickfont: { color: plotlyTheme(theme).font.color },
+							titlefont: { color: plotlyTheme(theme).font.color },
 						},
 						paper_bgcolor: plotlyTheme(theme).paper_bgcolor,
 						plot_bgcolor: plotlyTheme(theme).plot_bgcolor,

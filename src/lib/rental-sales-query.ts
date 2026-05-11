@@ -106,3 +106,38 @@ export const queryRegionTimeSeries = async (
 		await stmt.close();
 	}
 };
+
+// ABS Melbourne All-groups CPI quarterly index, base 2023-24 = 100.
+// Loaded once per SuburbPlot mount and rendered as a second-y-axis line
+// so users can eyeball how a given suburb's rental/sales trajectory
+// compares to general inflation.
+export type CpiPoint = { ts: Date; index: number };
+
+const CPI_QUERY = `
+	SELECT time_bucket, index_value
+	FROM ${RENTAL_DB_ALIAS}.cpi
+	WHERE region = 'Melbourne'
+	ORDER BY time_bucket
+`;
+
+export const queryCpiSeries = async (): Promise<CpiPoint[]> => {
+	const conn = getRentalDbConn();
+	if (!conn) throw new Error("DuckDB not initialised yet");
+	const stmt = await conn.prepare(CPI_QUERY);
+	try {
+		const rs = await stmt.query();
+		const rows = rs.toArray() as unknown as Array<{
+			time_bucket: unknown;
+			index_value: number;
+		}>;
+		return rows.map((r) => ({
+			ts: tsToDate(r.time_bucket),
+			index:
+				typeof r.index_value === "number"
+					? r.index_value
+					: Number(r.index_value),
+		}));
+	} finally {
+		await stmt.close();
+	}
+};
