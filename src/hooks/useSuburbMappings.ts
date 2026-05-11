@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { versionedUrl } from "@/lib/data-version";
 import { loadSuburbMappings } from "@/lib/suburb-mappings";
 
 // Fire-and-forget load of the SAL → rental_sales market group mapping.
@@ -6,7 +7,7 @@ import { loadSuburbMappings } from "@/lib/suburb-mappings";
 // SAL_CODE21 when the mapping isn't loaded.
 export const useSuburbMappings = (): void => {
 	useEffect(() => {
-		loadSuburbMappings(`${import.meta.env.BASE_URL}data/suburb_mappings.json`)
+		loadSuburbMappings(versionedUrl("data/suburb_mappings.json"))
 			.then((m) => {
 				console.log(
 					`[suburb-mappings] loaded · ${m.summary.totalSALs} SALs, ${m.summary.withRentalData} with rental, ${m.summary.withSalesData} with sales`,

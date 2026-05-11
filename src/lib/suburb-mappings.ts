@@ -49,12 +49,12 @@ export const loadSuburbMappings = async (
 	url: string,
 ): Promise<SuburbMappings> => {
 	if (_cache) return _cache;
-	// `no-cache` matches the tile-manifest pattern: revalidate on every page
-	// load via If-None-Match so Pages returns 304 when unchanged, 200 with
-	// new bytes after a fresh ETL run. Without this, a deploy can serve up
-	// to 10 minutes of stale mapping while the new tiles already reflect
-	// updated codes.
-	const res = await fetch(url, { cache: "no-cache" });
+	// URL is `?v=<dataset-version>`-stamped upstream (see data-version.ts),
+	// so cache-busting on a fresh ETL run is handled by URL change rather
+	// than `cache: "no-cache"`. Letting the browser cache deterministically
+	// per-version means a refresh within one deploy reuses bytes; a new
+	// deploy lands as a different URL and forces re-fetch.
+	const res = await fetch(url);
 	if (!res.ok) {
 		throw new Error(`Suburb mappings fetch failed: ${url} (${res.status})`);
 	}

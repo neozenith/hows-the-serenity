@@ -11,6 +11,7 @@ import {
 import type { RentalSeriesValues } from "@/hooks/useLatestRentalSeries";
 import type { RegionH3Cells } from "@/hooks/useRegionH3Cells";
 import type { NameLookup, RegionNames } from "@/hooks/useRegionNames";
+import { versionedUrl } from "@/lib/data-version";
 import type { RentalHexSeries } from "@/lib/rental-hex-series";
 import type { RegionSelection } from "./region";
 import { type LoadedManifest, makeGatedTileFetch } from "./tile-manifest";
@@ -25,8 +26,6 @@ import { recordTileLoad, recordTileUnload } from "./tile-stats";
 // browser treats a new ETL run as fresh resources rather than reusing stale
 // bytes from its 10-minute Pages cache window.
 const TILES_BASE = `${import.meta.env.BASE_URL}data/tiles`;
-const STATIC_DATA_BASE = `${import.meta.env.BASE_URL}data`;
-
 const tileUrl = (dir: string, version?: number) => {
 	const base = `${TILES_BASE}/${dir}/{z}/{x}/{y}.pbf`;
 	return version === undefined ? base : `${base}?v=${version}`;
@@ -35,9 +34,13 @@ const tileUrl = (dir: string, version?: number) => {
 export const manifestUrl = (dir: string) =>
 	`${TILES_BASE}/${dir}/manifest.json`;
 
-const COMMUTE_HULLS_TRAIN_URL = `${STATIC_DATA_BASE}/commute_hulls_metro_train.geojson`;
-const COMMUTE_HULLS_TRAM_URL = `${STATIC_DATA_BASE}/commute_hulls_metro_tram.geojson`;
-const LGA_GEOJSON_URL = `${STATIC_DATA_BASE}/selected_lga_2024_aust_gda2020.geojson`;
+// Non-tile static artefacts are resolved through `versionedUrl(...)` at
+// factory time — see CommuteHullSpec/LgaSpec.urlPath. Tile URLs use their
+// own per-layer cache-bust via the manifest's version field (see
+// `tileUrl` above); the two schemes are intentionally independent.
+const COMMUTE_HULLS_TRAIN_PATH = "data/commute_hulls_metro_train.geojson";
+const COMMUTE_HULLS_TRAM_PATH = "data/commute_hulls_metro_tram.geojson";
+const LGA_GEOJSON_PATH = "data/selected_lga_2024_aust_gda2020.geojson";
 
 // Official PTV brand colours: Metro blue, Yarra Trams green, V/Line purple.
 // Sourced from PTV's brand guidelines — these match the printed network maps
@@ -105,7 +108,10 @@ type CommuteHullSpec = {
 	layerId: string;
 	label: string;
 	hint: string;
-	url: string;
+	// Relative-to-public-root path. Resolved to a versioned URL via
+	// `versionedUrl(...)` at factory time, not at module load time —
+	// the data-version module isn't populated until main.tsx awaits it.
+	urlPath: string;
 	baseColor: RGB;
 	// Lowercase token used in the on-contour text label (e.g. "train 15m").
 	modeShort: string;
@@ -117,7 +123,7 @@ type LgaSpec = {
 	layerId: "lga";
 	label: string;
 	hint: string;
-	url: string;
+	urlPath: string;
 };
 
 type IsoSpec = {
@@ -217,7 +223,7 @@ const SPECS: readonly LayerSpec[] = [
 		layerId: "commute-hulls-train",
 		label: "Train commute hulls",
 		hint: "15/30/45/60-min from Southern Cross",
-		url: COMMUTE_HULLS_TRAIN_URL,
+		urlPath: COMMUTE_HULLS_TRAIN_PATH,
 		baseColor: TRAIN_COLOR,
 		modeShort: "train",
 	},
@@ -227,7 +233,7 @@ const SPECS: readonly LayerSpec[] = [
 		layerId: "commute-hulls-tram",
 		label: "Tram commute hulls",
 		hint: "15/30/45/60-min from Southern Cross",
-		url: COMMUTE_HULLS_TRAM_URL,
+		urlPath: COMMUTE_HULLS_TRAM_PATH,
 		baseColor: TRAM_COLOR,
 		modeShort: "tram",
 	},
@@ -242,7 +248,7 @@ const SPECS: readonly LayerSpec[] = [
 		layerId: "lga",
 		label: "LGA boundaries",
 		hint: "ABS LGA 2024 · click for LGA-tier rental data",
-		url: LGA_GEOJSON_URL,
+		urlPath: LGA_GEOJSON_PATH,
 	},
 	{
 		kind: "iso",
@@ -449,7 +455,7 @@ export const LAYER_DISPLAY_DEFS: ReadonlyArray<{
 const makeCommuteHullLayer = (s: CommuteHullSpec, visible: boolean): Layer =>
 	new GeoJsonLayer({
 		id: s.layerId,
-		data: s.url,
+		data: versionedUrl(s.urlPath),
 		visible,
 		pickable: false,
 		stroked: true,
@@ -551,7 +557,7 @@ const makeCommuteHullLabelLayer = (
 ): Layer =>
 	new TextLayer<HullLabel>({
 		id: `${s.layerId}-labels`,
-		data: getHullLabels(s.url, s.modeShort),
+		data: getHullLabels(versionedUrl(s.urlPath), s.modeShort),
 		visible,
 		pickable: false,
 		getPosition: (d: HullLabel) => d.position,
@@ -579,7 +585,7 @@ const makeLgaLayer = (
 ): Layer =>
 	new GeoJsonLayer({
 		id: s.layerId,
-		data: s.url,
+		data: versionedUrl(s.urlPath),
 		visible,
 		pickable: true,
 		stroked: true,

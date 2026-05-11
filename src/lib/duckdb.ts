@@ -1,4 +1,5 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
+import { versionedUrl } from "@/lib/data-version";
 
 export interface TableCount {
 	name: string;
@@ -11,7 +12,10 @@ export interface InitOptions {
 
 const DB_FILENAME = "rental_sales.duckdb";
 const DB_ALIAS = "rental_sales";
-const DB_URL = `${import.meta.env.BASE_URL}data/${DB_FILENAME}`;
+// Resolved lazily inside `initRentalDb` rather than at module load so
+// `versionedUrl` is only called after `loadDataVersion()` resolves in
+// main.tsx. Module top-level would throw because `_version` is null
+// before that promise lands.
 
 // Module-level singleton connection. Kept open after init so subsequent
 // queries (rental-sales chart) can share the same WASM database without
@@ -61,10 +65,11 @@ export const initRentalDb = async ({
 	const conn = await db.connect();
 
 	onProgress?.(`Fetching ${DB_FILENAME}…`);
-	const response = await fetch(DB_URL);
+	const dbUrl = versionedUrl(`data/${DB_FILENAME}`);
+	const response = await fetch(dbUrl);
 	if (!response.ok) {
 		throw new Error(
-			`Failed to fetch ${DB_URL}: ${response.status} ${response.statusText}`,
+			`Failed to fetch ${dbUrl}: ${response.status} ${response.statusText}`,
 		);
 	}
 	const buffer = new Uint8Array(await response.arrayBuffer());

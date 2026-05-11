@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { versionedUrl } from "@/lib/data-version";
 
 // In-memory H3 cell coverage lookups. Loaded once per *enabled* lifetime
 // from the two JSON files the ETL publishes via `etl publish region-h3-cells`.
@@ -46,10 +47,9 @@ export const useRegionH3Cells = (enabled: boolean): RegionH3Cells => {
 		// Track cancellation so a fast disable->enable->disable cycle
 		// doesn't land a stale fetch into the disabled state.
 		let cancelled = false;
-		const base = import.meta.env.BASE_URL;
 		Promise.all([
-			fetchCells(`${base}data/suburb_h3_cells.json`),
-			fetchCells(`${base}data/lga_h3_cells.json`),
+			fetchCells(versionedUrl("data/suburb_h3_cells.json")),
+			fetchCells(versionedUrl("data/lga_h3_cells.json")),
 		])
 			.then(([suburb, lga]) => {
 				if (!cancelled) setCells({ suburb, lga });

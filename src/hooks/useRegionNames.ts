@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { versionedUrl } from "@/lib/data-version";
 
 // Per-region name lookups for the hex-overlay tooltip. Maps SAL_CODE21 ->
 // "Brunswick" and LGA_CODE24 -> "Moreland". Names are stripped of the
@@ -29,10 +30,9 @@ export const useRegionNames = (): RegionNames => {
 	const [names, setNames] = useState<RegionNames>(EMPTY);
 
 	useEffect(() => {
-		const base = import.meta.env.BASE_URL;
 		Promise.all([
-			fetchNames(`${base}data/suburb_names.json`),
-			fetchNames(`${base}data/lga_names.json`),
+			fetchNames(versionedUrl("data/suburb_names.json")),
+			fetchNames(versionedUrl("data/lga_names.json")),
 		])
 			.then(([suburb, lga]) => setNames({ suburb, lga }))
 			.catch((err: unknown) => {

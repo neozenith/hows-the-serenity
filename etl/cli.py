@@ -51,6 +51,7 @@ from etl.steps import (
     publish_region_h3_cells,
     publish_region_names,
     publish_sal,
+    publish_version,
     tile_isochrone,
     tile_ptv,
     tile_sal,
@@ -72,6 +73,7 @@ SUBURB_H3_CELLS_JSON = PUBLIC_DATA_DIR / "suburb_h3_cells.json"
 LGA_H3_CELLS_JSON = PUBLIC_DATA_DIR / "lga_h3_cells.json"
 SUBURB_NAMES_JSON = PUBLIC_DATA_DIR / "suburb_names.json"
 LGA_NAMES_JSON = PUBLIC_DATA_DIR / "lga_names.json"
+DATA_VERSION_JSON = PUBLIC_DATA_DIR / "version.json"
 
 ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
 ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
@@ -261,6 +263,10 @@ def cmd_publish_region_names(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_publish_version(args: argparse.Namespace) -> None:
+    publish_version.run(output=args.output)
+
+
 # --- `etl all` orchestration -------------------------------------------------
 #
 # The full pipeline as a flat, ordered list of subcommand argv tuples. Each
@@ -294,6 +300,10 @@ PIPELINE_STEPS: tuple[tuple[str, ...], ...] = (
     *tuple(("tile", "isochrone", "--duration", str(d)) for d in ISOCHRONE_DURATIONS),
     *tuple(("tile", "ptv-lines", "--mode", m) for m in PTV_MODES),
     *tuple(("tile", "ptv-stops", "--mode", m) for m in PTV_MODES),
+    # --- version stamp (must be LAST) ---
+    # Writing version.json after every other artefact means the frontend
+    # never sees a "fresh version" pointer with stale underlying data.
+    ("publish", "version"),
 )
 
 
@@ -385,6 +395,7 @@ def cmd_status(_: argparse.Namespace) -> None:
         ("LGA H3 cells JSON", LGA_H3_CELLS_JSON, "file"),
         ("Suburb names JSON", SUBURB_NAMES_JSON, "file"),
         ("LGA names JSON", LGA_NAMES_JSON, "file"),
+        ("Data version JSON", DATA_VERSION_JSON, "file"),
     ]
     print(f"{'Artifact':<30}  {'Exists':<7}  {'Size':>10}  Path")
     print("-" * 100)
@@ -691,6 +702,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output JSON path for LGA names",
     )
     region_names_publish.set_defaults(func=cmd_publish_region_names)
+
+    version_publish = publish_sub.add_parser(
+        "version",
+        help=(
+            "Write public/data/version.json with the current unix epoch. "
+            "Frontend appends ?v=<version> to every non-tile artefact URL "
+            "so a new ETL run cliff-edges the data layer's cache. Must run "
+            "LAST in the pipeline."
+        ),
+    )
+    version_publish.add_argument(
+        "--output",
+        type=Path,
+        default=DATA_VERSION_JSON,
+        help="Output JSON path for the version pointer",
+    )
+    version_publish.set_defaults(func=cmd_publish_version)
 
     # `etl tile <source>`
     tile_p = top_sub.add_parser("tile", help="Tile intermediate Parquet to MVT XYZ tiles")
