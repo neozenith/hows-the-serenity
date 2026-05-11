@@ -137,10 +137,12 @@ test.describe("Suburb selection", () => {
 			);
 
 			// Plot panel renders bottom-center after selection. Header includes
-			// "SAL <code>". Wait up to 15s — Plotly's lazy chunk download +
-			// DuckDB query both need to complete.
+			// "SAL <code>". Cold CI runners need real headroom here: even after
+			// setSelection fires, the main thread is busy with MVT tile fetches
+			// and DuckDB initialisation, so the first React render lands ~10-15s
+			// later. 30s leaves margin without masking a true hang.
 			const panel = page.locator('aside:has-text("SAL")').first();
-			await panel.waitFor({ state: "visible", timeout: 15_000 });
+			await panel.waitFor({ state: "visible", timeout: 30_000 });
 
 			// Wait for Plotly's chart SVG to actually be in the DOM. `.main-svg`
 			// is Plotly's root chart-element class. Without this wait the
@@ -148,11 +150,13 @@ test.describe("Suburb selection", () => {
 			// as visual evidence. If this never appears something is silently
 			// stuck inside Plotly's render — that's a real failure to surface.
 			//
-			// Generous timeout: with 5 default-visible layers (suburbs + iso5/15
-			// + 3 line layers) the initial tile-fetch burst competes with
-			// Plotly's ~700KB lazy chunk, which on a cold cache can take 10s+.
+			// 60s because the cold path on CI is: rental_sales.duckdb fetch
+			// (~2s for 4.6MB), region query, CPI query, Vite-compiled Plotly
+			// chunks (~700KB), and Plotly's first render with 2 y-axes + 8
+			// traces. Trace from CI run 25697868728 showed .main-svg first
+			// appearing 32s after the wait started — 30s was 2s too tight.
 			const chartSvg = panel.locator(".main-svg").first();
-			await chartSvg.waitFor({ state: "visible", timeout: 30_000 });
+			await chartSvg.waitFor({ state: "visible", timeout: 60_000 });
 
 			// Default view is Rental. Snapshot it.
 			const rentalTab = panel.getByRole("button", { name: /^Rental/ });
