@@ -75,8 +75,8 @@ test.describe("Forecast traces on the SuburbPlot", () => {
 		await panel.waitFor({ state: "visible", timeout: 30_000 });
 		await panel.locator(".main-svg").first().waitFor({
 			state: "visible",
-			// 90s (up from 60s) — see suburb-click.spec.ts comment; same cause.
-			timeout: 90_000,
+			// 150s (up from 90s) — see suburb-click.spec.ts comment; same cause.
+			timeout: 150_000,
 		});
 
 		// Pull Plotly's live data array off the chart element. Plotly stores

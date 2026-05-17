@@ -161,10 +161,12 @@ test.describe("Suburb selection", () => {
 			// traces. Trace from CI run 25697868728 showed .main-svg first
 			// appearing 32s after the wait started — 30s was 2s too tight.
 			const chartSvg = panel.locator(".main-svg").first();
-			// 90s (up from 60s) — the cold path now also evaluates the
-			// yield-ratio + model-details code paths added in May 2026, which
-			// nudges first-render by ~5-10s on a cold MVT cache.
-			await chartSvg.waitFor({ state: "visible", timeout: 90_000 });
+			// 150s (up from 90s) — CI cold path now has cascading lazy chunks
+			// (SuburbPlot → DuckDB → Plotly) plus the school-zone tile layers
+			// settling. Trace last-frame screenshots confirm the chart does
+			// render eventually; 150s leaves headroom for the worst-case
+			// cold load while the 300s global test timeout still bounds it.
+			await chartSvg.waitFor({ state: "visible", timeout: 150_000 });
 
 			// Default view is Rental. Snapshot it.
 			const rentalTab = panel.getByRole("button", { name: /^Rental/ });

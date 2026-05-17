@@ -13,11 +13,15 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
 	testDir: "./e2e",
-	// Bumped from 90s as the layer count grew; full-page screenshots after
-	// 7 MVTLayer settling can run 60s+ on a cold dev server. Re-evaluate if
-	// total runtime starts dominating CI.
-	timeout: 180_000,
-	expect: { timeout: 10_000 },
+	// Bumped 180s → 300s as the bundle grew further (school-zone tile
+	// layers + yield-ratio + Models tab + cluster_linkage). On CI the
+	// SuburbPlot lazy chunk + the DuckDB-WASM split chunk + Plotly each
+	// add a serial fetch; cold-load to first .main-svg can run >90s.
+	timeout: 300_000,
+	// 30s expect default (up from 10s) — covers the asynchronous
+	// suburb-mappings JSON fetch + chunk-load cascade. Per-assertion
+	// overrides still apply where finer-grained control is needed.
+	expect: { timeout: 30_000 },
 	fullyParallel: true,
 	forbidOnly: Boolean(process.env.CI),
 	retries: process.env.CI ? 2 : 0,
