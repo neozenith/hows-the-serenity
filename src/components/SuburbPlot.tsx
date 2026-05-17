@@ -1,16 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { Plot } from "@/lib/plotly";
-
-// Lazy-loaded so the Models tab's panel (and its rental-sales-query
-// fetches) only download when the user actually clicks Models. The
-// rental/sales/yield code paths stay in the main SuburbPlot chunk and
-// don't pay for the model-details tree on every map-side mount.
-const ModelDetailsPanel = lazy(() =>
-	import("@/components/explorer/ModelDetailsPanel").then((m) => ({
-		default: m.ModelDetailsPanel,
-	})),
-);
 import type { RegionSelection } from "@/lib/region";
 import {
 	type CpiPoint,
@@ -36,6 +26,16 @@ import {
 	buildYieldTraces,
 	type RegionMarketSeries,
 } from "@/lib/yield-ratio";
+
+// Lazy-loaded so the Models tab's panel (and its rental-sales-query
+// fetches) only download when the user actually clicks Models. The
+// rental/sales/yield code paths stay in the main SuburbPlot chunk and
+// don't pay for the model-details tree on every map-side mount.
+const ModelDetailsPanel = lazy(() =>
+	import("@/components/explorer/ModelDetailsPanel").then((m) => ({
+		default: m.ModelDetailsPanel,
+	})),
+);
 
 type View = "rental" | "sales" | "yield" | "models";
 
