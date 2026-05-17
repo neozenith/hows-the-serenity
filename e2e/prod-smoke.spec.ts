@@ -28,7 +28,6 @@ test.describe("Post-deploy smoke", () => {
 		"Set PLAYWRIGHT_BASE_URL to a remote URL (or use `make test-e2e-prod`)",
 	);
 
-
 	test("page loads, React mounts, root has content", async ({ page }) => {
 		const consoleErrors: string[] = [];
 		const pageErrors: string[] = [];
