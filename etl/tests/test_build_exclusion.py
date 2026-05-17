@@ -32,8 +32,12 @@ ASSETS_DIR = DIST_DIR / "assets"
 # minification can't touch them because they're emit names, not identifiers.
 FORBIDDEN_CHUNK_PREFIXES = (
     "Explorer-",  # the Explorer route entry chunk
-    "duckdb-",  # DuckDB-WASM is only pulled in by the Explorer's data layer
 )
+# duckdb-* is intentionally NOT forbidden: DuckDB-WASM is now used by
+# the main map's SuburbPlot chart queries (rental, sales, yield, CPI),
+# so a `duckdb-*` chunk is the expected tree-shaking outcome when two
+# or more lazy chunks share it (SuburbPlot + the lazily-loaded
+# ModelDetailsPanel inside the Models tab).
 
 # Source-string defence in depth: catches the case where minification is
 # turned off in a future Vite config change. These will not catch a real
