@@ -14,7 +14,8 @@
 
 import { expect, test } from "@playwright/test";
 
-const isRemote = !process.env.PLAYWRIGHT_BASE_URL?.startsWith("http://localhost");
+const isRemote =
+	!process.env.PLAYWRIGHT_BASE_URL?.startsWith("http://localhost");
 
 test.describe("Post-deploy smoke", () => {
 	test("page loads, React mounts, root has content", async ({ page }) => {
@@ -38,14 +39,19 @@ test.describe("Post-deploy smoke", () => {
 					await page.evaluate(
 						() => document.getElementById("root")?.children.length ?? 0,
 					),
-				{ timeout: 45_000, message: "#root never mounted (React boot failure)" },
+				{
+					timeout: 45_000,
+					message: "#root never mounted (React boot failure)",
+				},
 			)
 			.toBeGreaterThan(0);
 
 		// No JS-level errors and no page errors during mount. This catches the
 		// "silent boot" failure too: if React throws inside an effect, the
 		// error makes it to one of these listeners.
-		expect(pageErrors, `Page errors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+		expect(pageErrors, `Page errors:\n${pageErrors.join("\n")}`).toHaveLength(
+			0,
+		);
 		expect(
 			consoleErrors,
 			`Console errors:\n${consoleErrors.join("\n")}`,
@@ -69,9 +75,8 @@ test.describe("Post-deploy smoke", () => {
 						const root = document.getElementById("root");
 						if (!root) return "no-root";
 						const heading = root.querySelector("h1");
-						const status = heading?.parentElement?.querySelector(
-							'[role="status"]',
-						);
+						const status =
+							heading?.parentElement?.querySelector('[role="status"]');
 						return status?.getAttribute("aria-label") ?? "no-status";
 					}),
 				{ timeout: 60_000 },
