@@ -1,7 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
-import { ModelDetailsPanel } from "@/components/explorer/ModelDetailsPanel";
 import { Plot } from "@/lib/plotly";
+
+// Lazy-loaded so the Models tab's panel (and its rental-sales-query
+// fetches) only download when the user actually clicks Models. The
+// rental/sales/yield code paths stay in the main SuburbPlot chunk and
+// don't pay for the model-details tree on every map-side mount.
+const ModelDetailsPanel = lazy(() =>
+	import("@/components/explorer/ModelDetailsPanel").then((m) => ({
+		default: m.ModelDetailsPanel,
+	})),
+);
 import type { RegionSelection } from "@/lib/region";
 import {
 	type CpiPoint,
@@ -411,7 +420,15 @@ export default function SuburbPlot({
 					/>
 				)}
 				<div data-testid="suburb-plot-models-ready" data-state="chart">
-					<ModelDetailsPanel region={region} />
+					<Suspense
+						fallback={
+							<div className="px-2 py-4 text-neutral-500 text-xs">
+								Loading model details…
+							</div>
+						}
+					>
+						<ModelDetailsPanel region={region} />
+					</Suspense>
 				</div>
 			</div>
 		);
