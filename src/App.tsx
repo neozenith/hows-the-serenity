@@ -164,7 +164,7 @@ const App = () => {
 					onThreeDChange={setHex3D}
 				/>
 			)}
-			<TileMemoryOverlay />
+			<TileMemoryOverlay status={status} />
 			<SuburbPlotPanel
 				selection={selection}
 				onClose={() => setSelection(null)}

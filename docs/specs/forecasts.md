@@ -4,19 +4,65 @@
 
 ## Execution Plan
 
-<!-- TODO: Populated in Phase 4 (TDD Ticket Decomposition). Placeholder until Phase 2 refinement converges. -->
-
 ### Loop Runner Prompt
 
-<!-- TODO: Self-contained /loop prompt embedding docs/specs/forecasts.md. Pending Phase 4. -->
+```
+/loop selfpaced Read the gap analysis spec at docs/specs/forecasts.md.
+
+1. Read `.claude/skills/plan-gap/resources/tdd/tdd.md` and apply its
+   red-green-refactor workflow.
+2. Find the next ticket whose status is `[ ]` and whose `Depends on` are
+   all `[x]`. If none exists, write "spec complete" and exit the loop.
+3. RED — write the test described in the ticket's `Test outline`. Run the
+   test suite (`make test` or the targeted Vitest/pytest invocation). Confirm
+   the new test FAILS for the right reason.
+4. GREEN — write the minimum code described in `Implementation outline`.
+   Run the test suite. Confirm the new test passes and no existing tests
+   regressed.
+5. REFACTOR (optional) — apply the ticket's `Refactor candidates` while
+   staying green. Re-run the test suite after each refactor step.
+6. Mark the ticket's status checkbox `[x]` in docs/specs/forecasts.md.
+7. Update the Progress table in the Execution Plan section.
+8. Commit the changes with message `T<N>.<M>: <ticket title>`.
+9. Return — the loop will fire again for the next eligible ticket.
+
+If you encounter an ambiguity that the spec does not resolve, STOP the
+loop: add an `<!-- UNRESOLVED -->` ADR placeholder under the relevant
+G<N>, write a short status note explaining what blocked progress, and
+exit. The user must re-enter Phase 2 refinement to resolve the ADR
+before the loop can resume.
+
+DO NOT HALT using AskUserQuestion tool or any other HITL stalling tool calls. This is Human-On-The-Loop
+```
 
 ### Progress
 
-<!-- TODO: Roll-up table — one row per gap. Pending Phase 4. -->
+| Gap | Tickets total | `[x]` done | `[ ]` todo | Next eligible | Blocked on |
+|-----|--------------:|-----------:|-----------:|---------------|------------|
+| G1  | 4  | 4 | 0  | —    | — |
+| G2  | 4  | 4 | 0  | —    | — |
+| G4  | 4  | 4 | 0  | —    | — |
+| G7  | 5  | 5 | 0  | —    | — |
+| G8  | 3  | 3 | 0  | —    | — |
+| G3  | 4  | 4 | 0  | —    | — |
+| G5  | 5  | 5 | 0  | —    | — |
+| G6  | 5  | 5 | 0  | —    | — |
+| G9  | 6  | 6 | 0  | — (complete) | — |
+| **Total** | **40** | **40** | **0** | **spec complete** | — |
+
+"Next eligible" is the lowest-numbered `[ ]` ticket whose `Depends on` are all `[x]`. The `/loop` runner updates this table after every completed ticket.
 
 ### Done Criteria
 
-<!-- TODO: Checklist — all tickets [x], all Success Measures pass, no UNRESOLVED markers. Pending Phase 4. -->
+- [x] Every ticket in every G<N> is marked `[x]`
+- [x] Every Success Measure (Project Quality Bar + Domain-Specific) passes when executed (commands listed in the Success Measures table)
+- [x] No `<!-- UNRESOLVED -->` ADR markers remain
+- [x] No `<!-- LINK_NOT_VERIFIED -->`, `<!-- ASSUMPTION -->`, or `<!-- PAYWALLED -->` markers requiring user resolution
+- [x] `make ci` passes
+- [x] `bun run .claude/skills/mermaidjs_diagrams/scripts/mermaid_contrast.ts docs/specs/forecasts.md` exits 0
+- [x] `bun run .claude/skills/mermaidjs_diagrams/scripts/mermaid_complexity.ts docs/specs/forecasts.md` exits 0
+
+When all are true, the spec is complete. The runner emits "spec complete" and exits.
 
 ## Overview
 
@@ -60,8 +106,10 @@ flowchart LR
     G9 -.->|e2e + Vitest| G6
     G9 -.->|empirical cut<br/>selection feedback| G7
 
-    classDef ga fill:#6d28d9,stroke:#5b21b6,color:#ede9fe,stroke-width:2px
+    classDef ga fill:#6d28d9,stroke:#c4b5fd,color:#fff,stroke-width:2px
 ```
+
+*Caption: top-level dependency graph across all 9 gaps. Solid edges = direct deliverable dependency; dotted edges = test/corroboration/feedback. VCS: 13 ✅*
 
 **Recommended implementation order:** G1 → (G4 ∥ G7 ∥ G8) → G2 → G3 → (G5 ∥ G9) → G6. G4/G7/G8 are foundational. G5 (map) and G9 (`/explore` SPA) consume the same DuckDB tables but render different surfaces — parallelisable. G9's `models/dendrogram` sub-page feeds back into G7 via empirical cut-level selection (a post-bake decision recorded as its own Phase 4 ticket).
 
@@ -105,6 +153,26 @@ The sales row is the heart of why sales forecasts must be derived, not directly 
 
 ```mermaid
 flowchart LR
+    src[("data/originals/<br/>ABS xlsx + SDMX API")]:::cs
+    etl["Python ETL<br/>extract / publish / tile"]:::csTrans
+    pub[("public/data/<br/>rental_sales.duckdb<br/>~4.5 MB")]:::csOut
+    fe["Browser runtime<br/>SuburbPlot.tsx<br/>(observed only)"]:::csFE
+
+    src --> etl --> pub --> fe
+
+    classDef cs       fill:#b45309,stroke:#fde68a,color:#fff,stroke-width:2px
+    classDef csTrans  fill:#c2410c,stroke:#fed7aa,color:#fff,stroke-width:2px
+    classDef csOut    fill:#0f766e,stroke:#5eead4,color:#fff,stroke-width:2px
+    classDef csFE     fill:#1d4ed8,stroke:#93c5fd,color:#fff,stroke-width:2px
+```
+
+*Caption: source xlsx + live CPI API → Python ETL → static DuckDB file → browser-only consumer. No backend. VCS: 5.5 ✅*
+
+<details>
+<summary>📋 Detailed current-state architecture (12 nodes)</summary>
+
+```mermaid
+flowchart LR
     subgraph src["data/originals/"]
         rentX[("rental *.xlsx<br/>~157 suburbs × 7 sheets<br/>~91 LGAs × 7 sheets")]:::cs
         salesX[("sales *.xlsx<br/>House / Unit / VacantLand")]:::cs
@@ -136,12 +204,14 @@ flowchart LR
     absAPI --> ext2 --> cpiP --> ddb
     ddb --> rsq --> plot
 
-    classDef cs        fill:#b45309,stroke:#92400e,color:#fef3c7,stroke-width:2px
-    classDef csTrans   fill:#c2410c,stroke:#9a3412,color:#fff7ed,stroke-width:2px
-    classDef csInt     fill:#fef3c7,stroke:#b45309,color:#92400e,stroke-width:1px
-    classDef csOut     fill:#047857,stroke:#065f46,color:#d1fae5,stroke-width:2px
-    classDef csFE      fill:#1e40af,stroke:#1e3a8a,color:#e0e7ff,stroke-width:2px
+    classDef cs       fill:#b45309,stroke:#fde68a,color:#fff,stroke-width:2px
+    classDef csTrans  fill:#c2410c,stroke:#fed7aa,color:#fff,stroke-width:2px
+    classDef csInt    fill:#fef3c7,stroke:#b45309,color:#1e293b,stroke-width:1px
+    classDef csOut    fill:#0f766e,stroke:#5eead4,color:#fff,stroke-width:2px
+    classDef csFE     fill:#1d4ed8,stroke:#93c5fd,color:#fff,stroke-width:2px
 ```
+
+</details>
 
 ### Frontend rendering today
 
@@ -167,40 +237,90 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    subgraph etl["Python ETL"]
-        ext1["extract_rental_sales"]:::dsExist
-        ext2["extract_cpi"]:::dsExist
-        fc["forecast_rental_sales<br/>(NEW)<br/>statsforecast.AutoARIMA<br/>+ yield-bridge for sales"]:::dsNew
-        bt["forecast_backtest<br/>(NEW, optional/v1)<br/>holdout MAPE + diagnostics"]:::dsNew
-        pub["publish_version"]:::dsExist
+    etlExist["Existing ETL<br/>extract + publish + tile"]:::dsExist
+    etlNew["NEW: forecast_rental_sales<br/>+ build_sal_hierarchy<br/>+ build_lga_hierarchy"]:::dsNew
+    ddb[("rental_sales.duckdb<br/>+ forecasts + yields<br/>+ geographic_hierarchy<br/>+ diagnostics")]:::dsOut
+    tsModels[("ts_models.duckdb<br/>(local-only)<br/>linkage_matrix<br/>+ sarimax_decompositions")]:::dsLocal
+    map["Map at /<br/>SuburbPlot + bands"]:::dsFE
+    explore["/explore/:page/:subpage/<br/>(VITE_ENABLE_EXPLORE flag)"]:::dsFEExplore
+
+    etlExist --> etlNew --> ddb
+    etlNew --> tsModels
+    ddb --> map
+    ddb --> explore
+    tsModels --> explore
+
+    classDef dsExist     fill:#0f766e,stroke:#5eead4,color:#fff,stroke-width:2px
+    classDef dsNew       fill:#047857,stroke:#a7f3d0,color:#fff,stroke-width:2px
+    classDef dsOut       fill:#0f766e,stroke:#5eead4,color:#fff,stroke-width:2px
+    classDef dsLocal     fill:#334155,stroke:#94a3b8,color:#fff,stroke-width:2px,stroke-dasharray:6 4
+    classDef dsFE        fill:#1d4ed8,stroke:#93c5fd,color:#fff,stroke-width:2px
+    classDef dsFEExplore fill:#4338ca,stroke:#c7d2fe,color:#fff,stroke-width:2px,stroke-dasharray:6 4
+```
+
+*Caption: NEW bake steps populate two DBs — `rental_sales.duckdb` (shipped) and `ts_models.duckdb` (local-only behind feature flag). Dashed border = excluded from production deploy. VCS: 7 ✅*
+
+<details>
+<summary>📋 Detailed desired-state pipeline (17 nodes)</summary>
+
+```mermaid
+flowchart LR
+    subgraph etl["Python ETL (etl/steps)"]
+        ext1["extract_rental_sales<br/>(existing)"]:::dsExist
+        ext2["extract_cpi<br/>(existing, refreshed)"]:::dsExist
+        salH["build_sal_hierarchy<br/>(NEW)"]:::dsNew
+        lgaH["build_lga_hierarchy<br/>(NEW)"]:::dsNew
+        fc["forecast_rental_sales<br/>(NEW) — AutoARIMA + CPI<br/>+ yield bridge<br/>+ bedroom borrowing"]:::dsNew
+        pub["publish_version<br/>(existing)"]:::dsExist
     end
 
-    subgraph ddb["rental_sales.duckdb (target ~5.5 MB)"]
-        rs["rental_sales<br/>(observed, unchanged)"]:::dsExist
-        cpi["cpi<br/>(observed, unchanged)"]:::dsExist
-        fcT["forecasts (NEW)<br/>series_id, ds, horizon_q,<br/>y_hat, lo80, hi80, lo95, hi95,<br/>model, fit_date"]:::dsNew
-        diag["forecast_diagnostics (NEW v1)<br/>series_id, mape, smape,<br/>ljungbox_p, jb_p, breakvar_p,<br/>aic, n_obs"]:::dsNew
-        yld["yields (NEW)<br/>geospatial_codes, ds,<br/>annual_rent, sale_price,<br/>gross_yield"]:::dsNew
+    subgraph ddbProd["rental_sales.duckdb (shipped, ~5.5 MB)"]
+        rs["rental_sales<br/>(observed)"]:::dsExist
+        cpi["cpi<br/>(observed)"]:::dsExist
+        fcT["forecasts (NEW)<br/>imputation_method<br/>+ is_nowcast<br/>+ cpi_is_projected"]:::dsNew
+        yld["yields (NEW)<br/>per-(suburb x dwelling)<br/>+ source provenance"]:::dsNew
+        gh["geographic_hierarchy<br/>(NEW) — tier fused<br/>+ cluster_centroids"]:::dsNew
+        diag["forecast_diagnostics<br/>(NEW) — sMAPE + LB/JB<br/>+ corroboration table"]:::dsNew
+    end
+
+    subgraph ddbLocal["ts_models.duckdb (local-only)"]
+        linkM[("linkage_matrix<br/>full scipy Z")]:::dsLocal
+        decomp[("sarimax_decompositions<br/>+ fitted_params<br/>+ backtest_folds")]:::dsLocal
     end
 
     subgraph fe["Browser runtime"]
-        rsq["rental-sales-query.ts<br/>queryRegionTimeSeries (existing)<br/>queryRegionForecast (NEW)<br/>queryRegionYield (NEW v1)"]:::dsFE
-        plot["SuburbPlot.tsx<br/>observed trace (existing)<br/>+ dashed forecast trace (NEW)<br/>+ Plotly fill: tonexty band (NEW)"]:::dsFE
+        plot["Map at /<br/>SuburbPlot.tsx<br/>+ dashed nowcast<br/>+ 80/95 nested bands"]:::dsFE
+        exp["/explore/:page/:subpage/<br/>(VITE_ENABLE_EXPLORE only)<br/>data/* + models/* sub-pages"]:::dsFEExplore
     end
 
-    ext1 --> ext2 --> fc --> bt --> pub
-    fc -- writes --> fcT
-    fc -- writes --> yld
-    bt -- writes --> diag
-    rs -- joined w/ --> rsq
-    fcT --> rsq
-    yld --> rsq
-    rsq --> plot
+    ext1 --> fc
+    ext2 --> fc
+    salH --> gh
+    lgaH --> gh
+    fc --> fcT
+    fc --> yld
+    fc --> diag
+    fc --> decomp
+    fc --> pub
+    rs --> plot
+    fcT --> plot
+    yld --> plot
+    rs --> exp
+    fcT --> exp
+    yld --> exp
+    gh --> exp
+    diag --> exp
+    linkM --> exp
+    decomp --> exp
 
-    classDef dsExist fill:#0e7490,stroke:#155e75,color:#cffafe,stroke-width:2px
-    classDef dsNew   fill:#047857,stroke:#065f46,color:#d1fae5,stroke-width:2px
-    classDef dsFE    fill:#1e40af,stroke:#1e3a8a,color:#e0e7ff,stroke-width:2px
+    classDef dsExist     fill:#0f766e,stroke:#5eead4,color:#fff,stroke-width:2px
+    classDef dsNew       fill:#047857,stroke:#a7f3d0,color:#fff,stroke-width:2px
+    classDef dsLocal     fill:#334155,stroke:#94a3b8,color:#fff,stroke-width:2px,stroke-dasharray:6 4
+    classDef dsFE        fill:#1d4ed8,stroke:#93c5fd,color:#fff,stroke-width:2px
+    classDef dsFEExplore fill:#4338ca,stroke:#c7d2fe,color:#fff,stroke-width:2px,stroke-dasharray:6 4
 ```
+
+</details>
 
 ### Modeling stack (MVP defaults; alternates surfaced as ADRs)
 
@@ -226,6 +346,20 @@ This three-tier ladder maps directly onto the user's "future-state recommendatio
 ### Gap Map
 
 ```mermaid
+flowchart LR
+    CS["Current State<br/>9 deficiencies<br/>no forecast / no hierarchy<br/>no explorer / minimal tests"]:::cs --> GAPS["Gap Analysis<br/>9 gaps<br/>G1 through G9"]:::ga --> DS["Desired State<br/>9 deliverables<br/>nowcast bands + cluster fallback<br/>+ explorer SPA + tests"]:::ds
+
+    classDef cs fill:#b45309,stroke:#fde68a,color:#fff,stroke-width:2px
+    classDef ga fill:#6d28d9,stroke:#c4b5fd,color:#fff,stroke-width:2px
+    classDef ds fill:#047857,stroke:#a7f3d0,color:#fff,stroke-width:2px
+```
+
+*Caption: the 3-stage delta. Each stage holds 9 corresponding items — see the detailed map below. VCS: 4 ✅*
+
+<details>
+<summary>📋 Detailed Gap Map: 9-by-9-by-9 current → gap → desired (27 nodes + cross-links)</summary>
+
+```mermaid
 flowchart TD
     subgraph CS["Current State"]
         cs1["rental_sales table<br/>2,876 observed medians"]:::cs
@@ -236,7 +370,7 @@ flowchart TD
         cs6["No yield concept anywhere"]:::cs
         cs7["No SAL hierarchy or clustering"]:::cs
         cs8["No LGA hierarchy or corroboration signal"]:::cs
-        cs9["No exploration SPA<br/>no ts_models.duckdb<br/>no analyst inspection surface"]:::cs
+        cs9["No exploration SPA<br/>no ts_models.duckdb"]:::cs
     end
 
     subgraph GAPS["Gaps"]
@@ -245,22 +379,22 @@ flowchart TD
         g3["G3<br/>Sales via yield bridge<br/>+ bedroom borrowing"]:::ga
         g4["G4<br/>Forecast storage<br/>+ imputation labelling"]:::ga
         g5["G5<br/>Map-side bands<br/>+ provenance treatment"]:::ga
-        g6["G6<br/>Tests + diagnostics<br/>+ cross-hierarchy corroboration"]:::ga
+        g6["G6<br/>Tests + diagnostics<br/>+ corroboration"]:::ga
         g7["G7<br/>SAL agglomerative hierarchy"]:::ga
         g8["G8<br/>LGA agglomerative hierarchy<br/>(fused tables)"]:::ga
-        g9["G9<br/>/explore SPA<br/>data + models sub-pages<br/>react-router-dom nested"]:::ga
+        g9["G9<br/>/explore SPA<br/>data + models sub-pages"]:::ga
     end
 
     subgraph DS["Desired State"]
         ds1["forecast_rental_sales step"]:::ds
-        ds2["1,501 rental forecasts<br/>(12q horizon, 80/95 intervals)"]:::ds
-        ds3["Per-(suburb x dwelling x bedroom)<br/>sales forecasts (bedroom borrowing)"]:::ds
+        ds2["1,501 rental nowcasts<br/>(dynamic horizon, 80/95 nested)"]:::ds
+        ds3["Per-(suburb x dwelling x bedroom)<br/>sales via bedroom borrowing"]:::ds
         ds4["forecasts + yields tables<br/>+ imputation_method labelling"]:::ds
-        ds5["SuburbPlot: observed + imputed<br/>visually distinguished on map"]:::ds
-        ds6["pytest + vitest + backtest sMAPE<br/>+ SAL-LGA cluster corroboration"]:::ds
-        ds7["geographic_hierarchy tier='sal'<br/>+ cluster_centroids + full linkage matrix"]:::ds
-        ds8["geographic_hierarchy tier='lga'<br/>+ cluster_centroids + full linkage matrix"]:::ds
-        ds9["/explore/:page/:subpage/ SPA<br/>+ ts_models.duckdb (lazy)<br/>+ data + models sub-pages<br/>+ deep-linkable for e2e"]:::ds
+        ds5["SuburbPlot: observed + imputed<br/>visually distinguished"]:::ds
+        ds6["pytest + vitest + sMAPE<br/>+ SAL-LGA corroboration"]:::ds
+        ds7["geographic_hierarchy tier='sal'<br/>+ cluster_centroids + linkage"]:::ds
+        ds8["geographic_hierarchy tier='lga'<br/>+ cluster_centroids + linkage"]:::ds
+        ds9["/explore/:page/:subpage/ SPA<br/>+ ts_models.duckdb (lazy)"]:::ds
     end
 
     cs3 --> g1 --> ds1
@@ -282,10 +416,12 @@ flowchart TD
     g8 --> g9
     g9 -.->|empirical cut feedback| g7
 
-    classDef cs fill:#b45309,stroke:#92400e,color:#fef3c7,stroke-width:2px
-    classDef ga fill:#6d28d9,stroke:#5b21b6,color:#ede9fe,stroke-width:2px
-    classDef ds fill:#047857,stroke:#065f46,color:#d1fae5,stroke-width:2px
+    classDef cs fill:#b45309,stroke:#fde68a,color:#fff,stroke-width:2px
+    classDef ga fill:#6d28d9,stroke:#c4b5fd,color:#fff,stroke-width:2px
+    classDef ds fill:#047857,stroke:#a7f3d0,color:#fff,stroke-width:2px
 ```
+
+</details>
 
 ### Dependencies
 
@@ -316,8 +452,10 @@ flowchart LR
     G8 -.->|cross-hierarchy<br/>corroboration| G6
     G9 -.->|e2e + unit tests| G6
 
-    classDef ga fill:#6d28d9,stroke:#5b21b6,color:#ede9fe,stroke-width:2px
+    classDef ga fill:#6d28d9,stroke:#c4b5fd,color:#fff,stroke-width:2px
 ```
+
+*Caption: same as the Overview Dependencies graph above — re-shown here so the Gap Analysis section is self-contained. VCS: 18 ✅ (within medium-density bounds).*
 
 **Recommended implementation order:** G1 (lay the step + CLI + library choice) → (G4 ∥ G7 ∥ G8) — forecast table shape + both hierarchies in fused tables + raw linkage matrices in `ts_models.duckdb` — → G2 (rental forecasts) → G3 (sales via yield bridge, consumes G2 + G7 + G8) → (G5 ∥ G9) — map-side bands and `/explore` SPA parallelisable → G6 (tests, diagnostics, cross-hierarchy corroboration, full slug-taxonomy e2e across every `/explore/:page/:subpage/`). The G9 → G7 dotted edge represents the **empirical cut-level selection** as a post-bake Phase 4 ticket: once `/explore/models/dendrogram` is rendering, an analyst inspects each tier's dendrogram and either confirms the provisional cuts or feeds new values back into the G7 bake step.
 
@@ -409,6 +547,69 @@ def run(*, output_duckdb: Path, horizon_q: int = 12, n_jobs: int = -1, seed: int
 - No `fit_date` column is added beyond the existing scalar in the forecasts DDL (which records the single current bake's timestamp — useful for the frontend "as of YYYY-MM" footer, not for cross-bake comparison).
 - When MLFlow (or equivalent experiment-tracking tooling) is later adopted, it owns: vintage IDs, run metadata, per-vintage forecast snapshots, vintage comparison UX. The `forecasts` table itself stays single-vintage; MLFlow manages the historical projection externally.
 
+#### Tickets
+
+##### T1.1: Analyst can invoke `etl forecast bake --help` and see usage info (tracer bullet)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `uv run -m etl forecast bake --help` exits 0 and prints argparse help listing `--horizon-q`, `--n-jobs`, `--seed`, `--backtest-mode`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_cli.py`
+  - Name: `test_forecast_bake_help_lists_required_flags`
+  - Asserts: `subprocess.run(["uv","run","-m","etl","forecast","bake","--help"])` exits 0; stdout contains each required flag name.
+- **Implementation outline:**
+  - File(s): `etl/cli.py`, new skeleton `etl/steps/forecast_rental_sales.py`
+  - Add `forecast` parser group + `bake` subcommand; flag registration only — bake body lands in T1.3.
+- **Mocks:** `none`
+- **Depends on:** `none`
+
+##### T1.2: `etl forecast status` reports forecasts-table size
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `etl forecast status` queries the `forecasts` table size in a given DuckDB and prints it; reports `0` when the table is absent or empty.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_cli.py`
+  - Name: `test_forecast_status_reports_table_size`
+  - Asserts: empty `tmp_path` DuckDB → status prints `0`; after manual `CREATE TABLE forecasts AS SELECT 1` → prints `1`.
+- **Implementation outline:**
+  - File(s): `etl/cli.py`, `etl/steps/forecast_rental_sales.py`
+  - Add `status` leaf parser; query `information_schema.tables` then `COUNT(*) FROM forecasts`.
+- **Mocks:** `none` (real DuckDB in `tmp_path`)
+- **Depends on:** `T1.1`
+
+##### T1.3: Synthetic 2-series bake creates a non-empty `forecasts` table
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Given a synthetic DuckDB seeded with 2 rental series (100 quarters each) + matching CPI, `etl forecast bake` exits 0 and `forecasts` contains rows for both series.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_rental_sales.py`
+  - Name: `test_bake_writes_forecasts_for_both_synthetic_series`
+  - Asserts: post-bake `COUNT(DISTINCT geospatial_codes) FROM forecasts` == 2; per-series row count > 0.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Implement `run(*, output_duckdb, horizon_q, n_jobs, seed, backtest_mode)`. Load synthetic data, fit `statsforecast.AutoARIMA(season_length=4)` with CPI as `exog`, write to fresh `forecasts` table.
+- **Mocks:** `none` (real statsforecast; tiny synthetic data keeps wall-clock < 5s)
+- **Depends on:** `T1.2`
+
+##### T1.4: Bake writes `forecasts_meta.json` provenance file
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Every successful bake writes `data/converted/forecasts_meta.json` with `seed`, `bake_date`, `today_at_bake`, `cpi_max_date`, `library_versions{statsforecast,duckdb}`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_rental_sales.py`
+  - Name: `test_bake_writes_meta_provenance`
+  - Asserts: meta file exists; required keys parse correctly; re-running bake updates `bake_date` but preserves `seed`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Add `_write_meta` helper using `importlib.metadata.version` for dep versions.
+- **Mocks:** `none`
+- **Depends on:** `T1.3`
+- **Refactor candidates:** Extract `_write_meta` to a shared `etl/io/meta.py` once a second ETL step needs the same shape.
+
 ### G2: Quarterly rental forecasts with CPI exogenous
 
 **Current:** All 1,501 rental median series (529 LGA + 972 suburb, 103–106 quarterly obs each) exist in `rental_sales.duckdb` as observed history. The CPI table is right alongside them. There is no forecast layer, no exogenous regression, and the `SuburbPlot.tsx` rental tab paints only observed history.
@@ -489,6 +690,68 @@ The CPI shortfall problem is now contained: it only fires when the forward-forec
 **Decision:** When the forward-forecast horizon (next ADR) is > 0 AND that horizon extends beyond CPI's last observed quarter, project CPI itself via a single univariate `AutoARIMA(season_length=4)` and use the projected mean as the forward exog. Record per-row in `forecasts.cpi_is_projected BOOLEAN` so diagnostic queries can separate nowcast-grade confidence from forecast-grade confidence.
 
 **Rationale:** The nowcast framing makes this ADR almost vestigial — at today's bake (May 2026) with CPI through Mar 2026, even a 4-quarter forward forecast would have real CPI for Q1 + Q2 2026 (already published or imminent) and need projection only for Q3 + Q4. Univariate AutoARIMA matches the rest of the library stack and propagates uncertainty correctly. The scenario approach (Option 3) remains a stretch idea documented in the future-state ladder under v2 — surfacing CPI-path sensitivity is genuinely useful, but it's a multiplicative bake-time + frontend-complexity cost the MVP doesn't need.
+
+#### Tickets
+
+##### T2.1: Bake produces correct row count per rental series (nowcast horizon × eligible series)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For a synthetic input of N rental series each ending 3 quarters before `today`, the bake writes exactly `N × 3` rows into `forecasts` with `is_nowcast=TRUE` and `data_type='rental'`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_rental_sales.py`
+  - Name: `test_rental_nowcast_row_count_matches_horizon`
+  - Asserts: post-bake `SELECT COUNT(*) FROM forecasts WHERE data_type='rental' AND is_nowcast` equals `N × 3`; every row has `geospatial_codes` in the input set.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Compute `horizon_nowcast = ceil((today - last_observed) / freq)` per series; pass that as `h` to `StatsForecast.forecast()`.
+- **Mocks:** `today` clock pinned via the existing `--today-iso` flag (system boundary — time).
+- **Depends on:** `T1.3`, `T4.1`
+
+##### T2.2: Interval bounds are correctly ordered on every row
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Every row in `forecasts` satisfies `y_hat_lo_95 <= y_hat_lo_80 <= y_hat <= y_hat_hi_80 <= y_hat_hi_95`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_rental_sales.py`
+  - Name: `test_interval_bounds_are_correctly_ordered`
+  - Asserts: `SELECT COUNT(*) FROM forecasts WHERE NOT (y_hat_lo_95 <= y_hat_lo_80 AND y_hat_lo_80 <= y_hat AND y_hat <= y_hat_hi_80 AND y_hat_hi_80 <= y_hat_hi_95)` returns 0.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Map statsforecast's `AutoARIMA-lo-80/-hi-80/-lo-95/-hi-95` columns to the spec's `y_hat_lo_80` / `y_hat_hi_80` / etc. (column rename); add the ordering assertion as a bake-time post-condition.
+- **Mocks:** `none`
+- **Depends on:** `T2.1`
+
+##### T2.3: CPI is passed as exog and `cpi_is_projected=FALSE` for in-window nowcast rows
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For every rental nowcast row whose `ds` is `<= max(cpi.time_bucket)`, `cpi_is_projected=FALSE`; for rows whose `ds` is past CPI's last observation (none expected at `forward_h=0`), the flag would be `TRUE`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_rental_sales.py`
+  - Name: `test_cpi_is_projected_flag_matches_cpi_window`
+  - Asserts: synthetic CPI ending at `2026-03-01`; rental nowcasts at `2025-12-01` / `2026-03-01` → all rows have `cpi_is_projected=FALSE`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Build `X_df` from CPI; tag each `ds` with `cpi_is_projected` based on whether it falls inside CPI's observed window; persist the flag.
+- **Mocks:** `none`
+- **Depends on:** `T2.2`
+
+##### T2.4: Synthetic stationary series + CPI level shift produces directionally correct forecast
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Given a synthetic rental series whose level historically follows CPI plus white noise, AND a CPI input that recently shifted up by 10%, the forecast's mean `y_hat` is higher than the last observation's level (within a 1σ residual band).
+- **Test outline:**
+  - File: `etl/tests/test_forecast_rental_sales.py`
+  - Name: `test_cpi_exog_drives_forecast_direction`
+  - Asserts: `y_hat[-1] > last_observed_y` for the synthetic series; difference exceeds 0.5 × `std(residuals)`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - No new code if T2.1–T2.3 are correct — this test exercises the existing path with adversarial synthetic data.
+- **Mocks:** `none` (deterministic synthetic series + seeded numpy RNG)
+- **Depends on:** `T2.3`
 
 ### G3: Annual sales forecasts via rental-yield bridge
 
@@ -585,6 +848,68 @@ The frontend can render nowcast (high confidence — exog observed) distinctly f
 - **G3 row count** — sales forecast row count increases from 1,375 → up to ~6× more (3 dwelling types × bedroom expansion where rental data permits) — still well inside the 6 MB DuckDB ceiling.
 - **G6** — new test fixture exercising the bedroom-borrowing math: known suburb yield, known per-bedroom rent → assert per-bedroom sales prices match the expected `rent × 52 / yield`.
 
+#### Tickets
+
+##### T3.1: Direct-match yield = (rent × 52) / sale_price for a known synthetic input
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For a synthetic suburb where the rental "all/all" series gives `500 AUD/wk` and the sales "house all" series gives `520_000 AUD`, the yield row written to `yields` has `gross_yield ≈ 0.05` (within 1e-9).
+- **Test outline:**
+  - File: `etl/tests/test_forecast_yield_bridge.py`
+  - Name: `test_direct_yield_math_round_trip`
+  - Asserts: `SELECT gross_yield, source FROM yields WHERE geospatial_codes = 'TEST'` returns exactly one row; `gross_yield` matches `(500 * 52) / 520000` to 9 decimal places; `source = 'suburb_direct'`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - `_compute_direct_yields(con)` — DuckDB SQL joining rental_all_all and sales on `geospatial_codes`, computing `(value × 52) / sale_price`; insert into `yields` with `source='suburb_direct'`.
+- **Mocks:** `none`
+- **Depends on:** `T2.4`
+
+##### T3.2: SAL-cluster fallback writes `source='cluster_fallback'` + non-NULL `cluster_id`
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For a synthetic sales SAL that has no direct rental match but DOES sit inside a SAL cluster with ≥3 rental-bearing siblings, the bake writes a yield row with `source='cluster_fallback'` and `provenance_cluster_id` referencing that cluster.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_yield_bridge.py`
+  - Name: `test_sal_cluster_fallback_records_provenance`
+  - Asserts: yield row has `source='cluster_fallback'`; `provenance_cluster_id` matches a row in `cluster_centroids` with `tier='sal'`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Query `geographic_hierarchy` walking up cluster levels; pick the smallest cluster with `n_nodes_with_rental >= 3`; compute cluster median rent; write `source='cluster_fallback'` row.
+- **Mocks:** `none`
+- **Depends on:** `T7.5`, `T3.1`
+
+##### T3.3: Bedroom-borrowed sales row appears for (house, 3br) given rental_house_3br + sales_house_all
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For a synthetic suburb with `rental_house_3br = 600/wk` and `sales_house_all_yield = 0.04`, the bake produces a `forecasts` row at `(dwelling_type='house', bedrooms='3')` with `y_hat ≈ (600 × 52) / 0.04` and `imputation_method='nowcast_bedroom_borrowed'`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_yield_bridge.py`
+  - Name: `test_bedroom_borrowed_sales_row_uses_dwelling_yield`
+  - Asserts: row exists at the expected key; `y_hat` matches the expected value to 6 decimal places; `imputation_method` matches the enum.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Outer loop over `(suburb × dwelling × bedroom)`; back-derive sales price from rental rent × 52 / yield_dwelling; tag with `imputation_method='nowcast_bedroom_borrowed'`.
+- **Mocks:** `none`
+- **Depends on:** `T3.1`
+
+##### T3.4: Every `forecasts` row has a non-NULL `imputation_method` matching its code path
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Bake-time post-condition: every row in `forecasts` has `imputation_method IS NOT NULL`; rows produced via the bedroom-borrowing branch are exactly the rows with `imputation_method='nowcast_bedroom_borrowed'`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_yield_bridge.py`
+  - Name: `test_imputation_method_round_trips_per_code_path`
+  - Asserts: `SELECT COUNT(*) FROM forecasts WHERE imputation_method IS NULL` == 0; the bedroom-borrowed row counts match the expected code-path entry count.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - At each write site, pass the matching enum value; add an assertion before `INSERT` that the column is non-NULL.
+- **Mocks:** `none`
+- **Depends on:** `T3.3`, `T3.2`
+
 ### G4: Forecast storage schema in DuckDB
 
 **Current:** `public/data/rental_sales.duckdb` (~4.5 MB) holds `rental_sales` (long-format observed history) and `cpi` (Melbourne quarterly index). Schemas are pandas-inferred — no explicit DDL anywhere. The frontend reads via DuckDB-WASM with the alias `rental_sales` (see `src/lib/duckdb.ts:79`).
@@ -624,6 +949,68 @@ The model-name-prefixed columns matter when ensembling multiple models per serie
 **Rationale:** Three reasons in priority order. (1) Additive change — existing `queryRegionTimeSeries` and every chart consumer continues to function unchanged, which de-risks the rollout and means G5's frontend work can land independently of G2/G3's bake step. (2) Pattern match — the project already has a sibling-table precedent with `cpi` living alongside `rental_sales` in the same DuckDB file, queried via the same connection alias and rendered as a separate Plotly trace; that pattern is proven and well-tested. (3) Storage efficiency — Option 2's NULL-padded interval columns would add ~5 numeric columns × 162K observed rows × 8 bytes = ~6 MB of NULLs even before any forecast rows land, blowing the 6 MB artifact ceiling on its own; Option 3 introduces a second CDN asset, a separate cache lifecycle, and an extra network round trip on first suburb-click that buys nothing the same-file approach doesn't already deliver.
 
 **Cascading implications:** G5's `queryRegionForecast` sketch in the References section above is the correct shape unchanged. G6's pytest fixtures need two synthetic tables (`rental_sales` for the observed input, `forecasts` for the assertion target) rather than one — minor lift. G2/G3 bake step writes to `forecasts` with `DROP TABLE IF EXISTS forecasts; CREATE TABLE forecasts (...)` at the start of each run, making idempotency a single statement.
+
+#### Tickets
+
+##### T4.1: Explicit `CREATE TABLE forecasts (...)` DDL is committed in source (tracer for storage layer)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `etl/steps/forecast_rental_sales.py` contains a verbatim `CREATE TABLE forecasts (...)` statement listing every column with its type and NOT NULL constraint where required. The bake step executes this DDL before any insert.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_storage_schema.py`
+  - Name: `test_forecasts_table_has_explicit_ddl`
+  - Asserts: `grep -F "CREATE TABLE forecasts" etl/steps/forecast_rental_sales.py` finds a match; after a bake, `PRAGMA table_info(forecasts)` returns all expected columns with the spec's types.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Replace any `CREATE TABLE ... AS SELECT ...` pattern with an explicit multi-line DDL string; execute it at the start of bake; then `INSERT INTO forecasts ...`.
+- **Mocks:** `none`
+- **Depends on:** `T1.3`
+
+##### T4.2: `imputation_method` column rejects NULL inserts
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Attempting `INSERT INTO forecasts (...) VALUES (..., NULL, ...)` for the `imputation_method` column raises a `duckdb.ConstraintException`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_storage_schema.py`
+  - Name: `test_imputation_method_not_null_constraint`
+  - Asserts: `pytest.raises(duckdb.ConstraintException)` when inserting a row with `imputation_method = None`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - The `CREATE TABLE forecasts` DDL has `imputation_method VARCHAR NOT NULL`. Constraint is enforced by DuckDB; the test just exercises the negative path.
+- **Mocks:** `none`
+- **Depends on:** `T4.1`
+
+##### T4.3: Post-bake `rental_sales.duckdb` artifact stays under 6 MB
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** After a full bake against production-shaped inputs, `os.path.getsize('public/data/rental_sales.duckdb')` is less than 6 MB.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_storage_schema.py`
+  - Name: `test_forecasts_artifact_under_size_ceiling`
+  - Asserts: file size `< 6 * 1024 * 1024`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - No new code needed if the schema is right; this is a regression test that fails if a future change bloats the table.
+- **Mocks:** `none`
+- **Depends on:** `T4.1`
+
+##### T4.4: `provenance_cluster_id` is NULL iff `imputation_method` is direct/observed
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Bake-time post-condition: rows where `imputation_method` ∈ {`observed`, `nowcast_sarima_cpi`, `nowcast_yield_bridge_direct`, `nowcast_bedroom_borrowed`} have `provenance_cluster_id IS NULL`; rows where `imputation_method` ∈ {`nowcast_yield_bridge_sal_cluster`, `nowcast_yield_bridge_lga_cluster`} have `provenance_cluster_id IS NOT NULL`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_storage_schema.py`
+  - Name: `test_provenance_cluster_id_invariants_per_method`
+  - Asserts: two `SELECT COUNT(*) ... WHERE ...` queries verify the invariant in both directions; both return 0.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - At each write site, set `provenance_cluster_id` to `None` or the cluster id per the branch; add the post-condition check at the end of bake.
+- **Mocks:** `none`
+- **Depends on:** `T4.1`
 
 ### G5: Frontend rendering of forecast bands
 
@@ -700,6 +1087,106 @@ const buildForecastTrace = (s: SuburbTimeSeries) => {
 - `src/components/SuburbPlot.test.tsx` — Vitest fixtures cover `intervals={[80]}`, `intervals={[95]}`, `intervals={[80, 95]}` (default), and `intervals={[]}` (no bands) so the prop boundary is genuinely typed-and-tested.
 - `src/components/explorer/models/TimeseriesExplorer.tsx` (G9, local-only) — free to expose a sidebar control bound to `intervals` for analyst comparison — but that's a G9 deliverable, not a G5 one.
 - The `forecasts` table's interval columns (`y_hat_lo_80`, `y_hat_hi_80`, `y_hat_lo_95`, `y_hat_hi_95`) remain the source of truth — the rendering decision is a presentation concern, not a data concern.
+
+#### ADR: T5.4 unit-test seam — pure-TS row mapping, not the DuckDB round-trip
+
+| Option | Pros | Cons |
+|---|---|---|
+| Test queryRegionForecast end-to-end via DuckDB-WASM in jsdom (spec's literal wording) | Maximum fidelity to production runtime | jsdom ships no Worker; web-worker polyfill rejects blob: URLs; hours of polyfill scaffolding for marginal benefit |
+| Test queryRegionForecast against a Node DuckDB binding with an adapter | No worker dance; fast tests | Adapter pollutes production code; different binary |
+| **Split queryRegionForecast into (SQL + pure-TS row mapping); Vitest the pure mapping; Playwright the live SQL round-trip (← chosen)** | Test seam matches the project's `src/lib/` pure-TS convention; zero polyfill; full coverage via the layer that already exists for it | Two test files instead of one |
+
+**Decision:** **Split `queryRegionForecast` along its natural seam.** Extract a pure `forecastRowsToPoints(rows: ForecastRow[]): ForecastPoint[]` mapping function — that's the *real* unit of logic. The DuckDB round-trip is already covered by Playwright e2e in `e2e/suburb-click.spec.ts`'s extension (G5's e2e ticket). The Vitest test in T5.4 exercises the pure mapping function with synthetic `ForecastRow[]` input, asserts the resulting `ForecastPoint[]` has the right shape (ts is a Date, yHat is a number, lo95 ≤ lo80 ≤ yHat ≤ hi80 ≤ hi95), and never instantiates DuckDB.
+
+**Rationale (recovered via `/5ys` — see [[feedback-five-whys-on-unresolved]]):** The spec's literal wording ("real DuckDB-WASM in jsdom with synthetic seed data") asked the wrong question. The 5 Whys revealed:
+
+1. Why does T5.4 need a Vitest test? — To verify the SQL + row-shape transformation.
+2. Why does that need DuckDB at the Vitest layer? — It doesn't. Playwright e2e already exercises the live DuckDB round-trip; the Python bake tests already verify the schema. The only piece not covered elsewhere is the pure-TS row → `ForecastPoint` mapping.
+3. Why is pure-TS the natural seam? — `src/CLAUDE.md` documents `src/lib/` as the location for "pure TypeScript utilities, no JSX" — explicitly a unit-testable layer. The mapping logic belongs in that seam by convention.
+4. Why fight the test environment? — Specs frequently inherit default assumptions ("write a unit test against the library"). When the assumption collides with the project's actual layering, refactor the question, not the runtime.
+
+**Cascading implications:**
+- `src/lib/rental-sales-query.ts` exports both `forecastRowsToPoints` (pure, no I/O) and `queryRegionForecast` (thin wrapper: prepare statement → query → call mapping → return).
+- Vitest's `environment: "jsdom"` stays unchanged. No `web-worker` polyfill, no happy-dom swap.
+- Future G5/G6 frontend tests that need to exercise DuckDB round-trips should live in Playwright e2e, not Vitest. Vitest stays as the pure-logic unit-test layer for `src/lib/`.
+- The archived dead-end artifacts in `tmp/archived/src/` can be deleted now that the path is resolved — the resolution is "don't go down this road."
+
+#### Tickets
+
+##### T5.1: SuburbPlot renders dashed nowcast trace when forecast rows exist (tracer for G5)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Given a `SuburbTimeSeries` with non-empty `forecast` data, SuburbPlot's Plotly `data` array contains at least one trace with `mode: "lines"` and `line.dash: "dash"`.
+- **Test outline:**
+  - File: `src/components/SuburbPlot.test.tsx`
+  - Name: `renders dashed nowcast trace when forecast data present`
+  - Asserts: render the component with a synthetic `SuburbTimeSeries[]` carrying forecast rows; query `screen.getByTestId('plotly-chart')`; inspect data prop; assert at least one trace satisfies `line?.dash === 'dash'`.
+- **Implementation outline:**
+  - File(s): `src/components/SuburbPlot.tsx`, `src/lib/rental-sales-query.ts`
+  - Add `buildForecastTrace(series)` per the G5 References sketch; merge its return into the existing `data` array; pass through `data-testid="plotly-chart"` on the Plot wrapper.
+- **Mocks:** `none` (Vitest + jsdom + Testing Library — real Plotly render)
+- **Depends on:** `T3.4`
+
+##### T5.2: SuburbPlot renders nested 95%/80% bands by default
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** With the default `intervals` prop, two filled-area traces are emitted per series: one spanning `[lo95, hi95]` with lighter alpha, one spanning `[lo80, hi80]` with darker alpha.
+- **Test outline:**
+  - File: `src/components/SuburbPlot.test.tsx`
+  - Name: `renders nested 95 + 80 bands by default`
+  - Asserts: exactly two `fill: 'tonexty'` traces per forecast series; their `y` values match the lo95/hi95 and lo80/hi80 columns respectively; the 80% band's `fillcolor` alpha is higher than the 95% band's.
+- **Implementation outline:**
+  - File(s): `src/components/SuburbPlot.tsx`
+  - Loop the `intervals: readonly number[] = [80, 95] as const` prop descending; emit invisible upper-bound + filled lower-bound traces per level.
+- **Mocks:** `none`
+- **Depends on:** `T5.1`
+
+##### T5.3: SuburbPlot accepts `intervals` prop and renders only requested levels
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Passing `intervals={[80]}` causes the component to render exactly one filled-area band (the 80% band); passing `intervals={[]}` causes zero filled-area band traces.
+- **Test outline:**
+  - File: `src/components/SuburbPlot.test.tsx`
+  - Name: `intervals prop controls band trace count`
+  - Asserts: `intervals={[80]}` → 1 band trace per series; `intervals={[]}` → 0 band traces; default render → 2.
+- **Implementation outline:**
+  - File(s): `src/components/SuburbPlot.tsx`
+  - Use the `intervals` prop directly in the band-emission loop; no defaults inside the loop.
+- **Mocks:** `none`
+- **Depends on:** `T5.2`
+
+##### T5.4: `forecastRowsToPoints` pure mapping returns expected shape (pure-TS test seam)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Calling `forecastRowsToPoints(rows)` with a synthetic `ForecastRow[]` array returns a non-empty array of `ForecastPoint` objects with all required fields populated and bounds correctly ordered. The DuckDB round-trip itself is covered by Playwright e2e (G6); this Vitest exercises the pure-TS row-shape transformation only — per the resolved ADR above.
+- **Test outline:**
+  - File: `src/lib/rental-sales-query.test.ts`
+  - Name: `forecastRowsToPoints returns expected shape`
+  - Asserts: row count > 0; each row has `ts: Date`, `yHat: number`, `lo80`, `hi80`, `lo95`, `hi95`, `imputationMethod`, `isNowcast`; `lo95 <= lo80 <= yHat <= hi80 <= hi95` on every row; bigint / number / Date inputs for `ds` all coerce to a JS Date.
+- **Implementation outline:**
+  - File(s): `src/lib/rental-sales-query.ts`
+  - Add the `FORECAST_QUERY` constant, an exported `ForecastRow` type, an exported pure `forecastRowsToPoints(rows): ForecastPoint[]` mapping function, and the `queryRegionForecast` async wrapper that runs the prepared statement and pipes the result through the mapping function.
+- **Mocks:** `none` (pure-TS unit test of the mapping; no DuckDB involved at this layer)
+- **Depends on:** `T4.1`
+
+##### T5.5: CPI base-period comment matches source-of-truth
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `rental-sales-query.ts` line 111 comment reads "base 2011-12 = 100" (matching `extract_cpi.py`'s docstring).
+- **Test outline:**
+  - File: `src/lib/rental-sales-query.test.ts`
+  - Name: `cpi base period comment matches extractor`
+  - Asserts: read the file contents; assert the substring `"base 2011-12 = 100"` is present.
+- **Implementation outline:**
+  - File(s): `src/lib/rental-sales-query.ts`
+  - One-line comment fix.
+- **Mocks:** `none`
+- **Depends on:** `none`
 
 ### G6: Test coverage + diagnostics + backtest
 
@@ -786,6 +1273,83 @@ def test_bake_is_deterministic_under_seed(synthetic_db):
 - `Makefile` — `make forecast-bake` runs single-fold (CI-compatible); `make forecast-bake-rolling` invokes the rolling mode (~25 min wall-clock).
 - `data/converted/forecasts_meta.json` — provenance gains `backtest_mode`, `backtest_n_folds`, `backtest_step_size` so the analyst can tell from a deployed `rental_sales.duckdb` whether it was built from a single-fold or rolling run.
 - G6 Success Measure on sMAPE thresholds (`median sMAPE ≤ 15% rental, ≤ 20% sales`) applies to the single-fold mode (CI gate). The rolling mode produces a richer signal that the analyst inspects in `/explore/models/backtest` but doesn't gate CI.
+
+#### Tickets
+
+##### T6.1: Single-fold bake writes one sMAPE row per series to `forecast_diagnostics` (tracer for G6)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Default bake (`--backtest-mode single`) writes exactly one row per fitted series to `forecast_diagnostics` with non-NULL `smape` and `n_obs`.
+- **Test outline:**
+  - File: `etl/tests/test_forecast_diagnostics.py`
+  - Name: `test_single_fold_writes_smape_per_series`
+  - Asserts: `SELECT COUNT(DISTINCT series_id) FROM forecast_diagnostics` == `n_series_fit`; every row's `smape` is in `[0, 2]`; `n_obs` matches the per-series obs count used for fit.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - After main fit, drop last 4 quarters (rental) / last 2 years (sales), refit, predict held-out, compute sMAPE per series; INSERT into `forecast_diagnostics`.
+- **Mocks:** `none`
+- **Depends on:** `T2.1`
+
+##### T6.2: `make ci` post-bake gate fails when median rental sMAPE > 15%
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** A CI gate script reads `forecast_diagnostics`, computes per-data-type median sMAPE, exits non-zero if rental median exceeds 0.15 (or sales median exceeds 0.20).
+- **Test outline:**
+  - File: `etl/tests/test_diagnostics_gate.py`
+  - Name: `test_sMAPE_gate_fails_above_threshold`
+  - Asserts: seed a `forecast_diagnostics` table with synthetic rows whose median rental sMAPE is 0.25; invoke the gate script; assert non-zero exit + stderr mentions the breach.
+- **Implementation outline:**
+  - File(s): `etl/diagnostics_gate.py` (new), `Makefile`
+  - New `scripts/forecast_gate.py` reads the DB, computes medians, exits 0/1; `make ci` invokes it after `make forecast-bake`.
+- **Mocks:** `none`
+- **Depends on:** `T6.1`
+
+##### T6.3: SAL-LGA corroboration produces at least one row per LGA at the matched dendrogram level
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Post-bake `forecast_diagnostics_corroboration` contains a row per LGA pairing the LGA-tier rental against the equivalent-scale SAL cluster median; `divergence_pct` is computed and stored.
+- **Test outline:**
+  - File: `etl/tests/test_corroboration.py`
+  - Name: `test_corroboration_row_per_lga`
+  - Asserts: synthetic SAL+LGA hierarchies seeded; bake runs; `SELECT COUNT(DISTINCT lga_code) FROM forecast_diagnostics_corroboration` >= the count of LGAs that have rental data; `divergence_pct` is non-NULL on every row.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - SQL self-join on `cluster_centroids` picking the SAL level whose mean area best matches LGA scale; compute and persist divergence.
+- **Mocks:** `none`
+- **Depends on:** `T8.3`
+
+##### T6.4: First Vitest file in the project (`rental-sales-query.test.ts`) passes
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `bun run test --run` discovers and passes at least one Vitest file under `src/lib/` exercising `queryCpiSeries` against a synthetic DuckDB-WASM seed.
+- **Test outline:**
+  - File: `src/lib/rental-sales-query.test.ts`
+  - Name: `queryCpiSeries returns sorted points with base-2011-12 index values`
+  - Asserts: seed a synthetic CPI table; call `queryCpiSeries()`; assert returned array is sorted by `ts` ascending and each `index` is finite.
+- **Implementation outline:**
+  - File(s): `src/lib/rental-sales-query.test.ts` (new), `vitest.config.ts` (verify jsdom env), `package.json` (already wired)
+  - First Vitest in the codebase — wire up the jsdom-with-DuckDB-WASM pattern other tests will reuse.
+- **Mocks:** `none`
+- **Depends on:** `T5.4`
+
+##### T6.5: Bake is deterministic under a fixed seed (byte-identical re-runs)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Two consecutive `etl forecast bake --seed 42 --today-iso 2026-05-13` runs against the same synthetic input produce byte-identical rows in `forecasts` (modulo `bake_date` in the meta file).
+- **Test outline:**
+  - File: `etl/tests/test_forecast_rental_sales.py`
+  - Name: `test_bake_is_deterministic_under_seed`
+  - Asserts: two runs → `pd.testing.assert_frame_equal(first_forecasts, second_forecasts)`.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - Seed `numpy.random.default_rng(seed)`; pass through to `statsforecast`'s `random_state` argument where applicable; ensure no wall-clock-dependent code in the row data (the `fit_date` column uses `today` not `now`).
+- **Mocks:** `today` and `now` clocks pinned via flags (system boundary).
+- **Depends on:** `T1.4`
 
 ### G7: SAL geographic agglomerative hierarchy
 
@@ -932,6 +1496,82 @@ GROUP BY u.sal_code
 - The G3 fallback lookup keeps consuming the provisional cuts at MVP; after G9 `/explore/models/dendrogram` lands and the empirical decision is made, the cuts are updated by re-running `etl extract sal-hierarchy --cut-levels "$NEW_LEVELS"`.
 - Phase 4 ticket addition: `T_X: Use /explore/models/dendrogram to validate or override provisional cut levels` (post-bake, depends on G9 completion).
 
+#### Tickets
+
+##### T7.1: `etl extract sal-hierarchy --help` exists (tracer for G7)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `uv run -m etl extract sal-hierarchy --help` exits 0 and prints argparse help listing `--input-sal-parquet`, `--output-duckdb`, `--ts-models-duckdb`, `--cut-levels`.
+- **Test outline:**
+  - File: `etl/tests/test_build_sal_hierarchy.py`
+  - Name: `test_sal_hierarchy_cli_help`
+  - Asserts: subprocess exit 0; stdout contains each flag name.
+- **Implementation outline:**
+  - File(s): `etl/cli.py`, new skeleton `etl/steps/build_sal_hierarchy.py`
+  - Register subcommand under `extract`; no build logic yet — body lands in T7.2.
+- **Mocks:** `none`
+- **Depends on:** `T1.3`
+
+##### T7.2: Synthetic 5×5 grid SAL set populates `geographic_hierarchy` with `tier='sal'` rows at every persisted cut level
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Given a synthetic GeoDataFrame of 25 square SALs in a 5×5 grid, `etl extract sal-hierarchy --cut-levels 5,10,15` writes `25 × 3 = 75` rows to `geographic_hierarchy` with `tier='sal'` and one row per (SAL, cut-level) pair.
+- **Test outline:**
+  - File: `etl/tests/test_build_sal_hierarchy.py`
+  - Name: `test_synthetic_grid_writes_expected_row_count`
+  - Asserts: `SELECT COUNT(*) FROM geographic_hierarchy WHERE tier='sal'` == 75; every `node_id` is one of the 25 synthetic SAL codes.
+- **Implementation outline:**
+  - File(s): `etl/steps/build_sal_hierarchy.py`
+  - Build adjacency via `polygon.touches()`; reproject to MGA Zone 55; `sklearn.cluster.AgglomerativeClustering(linkage='average', connectivity=adj)` for each cut level; insert rows with `tier='sal'`.
+- **Mocks:** `none` (real GeoPandas + sklearn)
+- **Depends on:** `T7.1`
+
+##### T7.3: Clusters at every persisted cut level are contiguous under SAL adjacency
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For every `(parent_cluster_id, cluster_level)` group in `geographic_hierarchy WHERE tier='sal'`, the SALs in that group form a single connected component under the SAL `polygon.touches()` adjacency graph.
+- **Test outline:**
+  - File: `etl/tests/test_build_sal_hierarchy.py`
+  - Name: `test_clusters_are_contiguous`
+  - Asserts: load the adjacency graph; for each `parent_cluster_id`, build the subgraph induced by its member SALs; assert `networkx.is_connected(subgraph)` (or equivalent) is `True`.
+- **Implementation outline:**
+  - File(s): No new code needed if T7.2's adjacency-constrained linkage is correct. The test exercises the existing path with adversarial geometry (an L-shape, an island) to confirm contiguity-by-construction.
+- **Mocks:** `none`
+- **Depends on:** `T7.2`
+
+##### T7.4: `n_nodes_with_rental` is monotonically non-decreasing as you walk up the dendrogram
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For every SAL in a synthetic input where some leaves have rental data and others don't, the per-SAL chain of `n_nodes_with_rental` values across increasing `cluster_level` is non-decreasing.
+- **Test outline:**
+  - File: `etl/tests/test_build_sal_hierarchy.py`
+  - Name: `test_n_nodes_with_rental_monotonic`
+  - Asserts: for each `node_id`, ordering the chain by `cluster_level` ascending yields a non-decreasing sequence on `n_nodes_with_rental`.
+- **Implementation outline:**
+  - File(s): `etl/steps/build_sal_hierarchy.py`
+  - Compute `n_nodes_with_rental` per cluster centroid as the count of leaf SALs with non-NULL rental in `rental_sales`; populate `cluster_centroids`.
+- **Mocks:** `none`
+- **Depends on:** `T7.2`
+
+##### T7.5: Linkage matrix in `ts_models.duckdb` has exactly `N - 1` merge rows for `N` leaves
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** For 25 synthetic SAL leaves, `linkage_matrix` in `ts_models.duckdb` contains exactly 24 rows (the scipy linkage convention), each with `merge_step ∈ [0, 23]`, distinct `cluster_a`/`cluster_b` ids, and `tier='sal'`.
+- **Test outline:**
+  - File: `etl/tests/test_build_sal_hierarchy.py`
+  - Name: `test_linkage_matrix_row_count`
+  - Asserts: `SELECT COUNT(*) FROM ts_models.linkage_matrix WHERE tier='sal'` == 24; `merge_step` values form `{0..23}`.
+- **Implementation outline:**
+  - File(s): `etl/steps/build_sal_hierarchy.py`
+  - Capture scipy's `linkage(...)` `Z` matrix; flatten each `(merge_step, cluster_a, cluster_b, distance, n_obs)` row; INSERT into `ts_models.linkage_matrix` with `tier='sal'`.
+- **Mocks:** `none`
+- **Depends on:** `T7.2`
+
 ### G8: LGA geographic agglomerative hierarchy (parallel subtree to G7)
 
 **Current:** No LGA clustering or dendrogram exists. LGA polygons live in `data/converted/lga_2024_aust_gda2020.parquet` (extracted by `etl/steps/extract_sal.py`-adjacent logic, or its sibling step) and the shipped `public/data/selected_lga_2024_aust_gda2020.geojson` lists 80 Victorian LGAs with `LGA_CODE24`, `LGA_NAME24`, `STE_CODE21`, `STE_NAME21` properties. 79 of these have rental data (the rolled-up LGA-tier rental).
@@ -1008,6 +1648,53 @@ G7 and G8 remain separate ETL steps (`build_sal_hierarchy.py`, `build_lga_hierar
 - G6 cross-hierarchy corroboration becomes a self-join on `cluster_centroids` by matched `cluster_level` per `tier`.
 - G7 and G8's tests need to assert that their respective rows land in the fused tables with the correct `tier` value and no cross-contamination.
 - G9 explorer queries one table for the hierarchy view, filterable by `tier` + `cluster_level` + `node_id`.
+
+#### Tickets
+
+##### T8.1: `etl extract lga-hierarchy` writes `tier='lga'` rows to fused tables (tracer for G8)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Given a synthetic 9-LGA input (3×3 grid), `etl extract lga-hierarchy --cut-levels 3,5` writes `9 × 2 = 18` rows to `geographic_hierarchy` with `tier='lga'`, plus the corresponding cluster summaries and linkage-matrix rows.
+- **Test outline:**
+  - File: `etl/tests/test_build_lga_hierarchy.py`
+  - Name: `test_lga_hierarchy_writes_tier_lga_rows`
+  - Asserts: `SELECT COUNT(*) FROM geographic_hierarchy WHERE tier='lga'` == 18; `cluster_centroids WHERE tier='lga'` has the matching summary rows; `ts_models.linkage_matrix WHERE tier='lga'` has 8 merge rows.
+- **Implementation outline:**
+  - File(s): `etl/cli.py`, new `etl/steps/build_lga_hierarchy.py`
+  - Mirror `build_sal_hierarchy.py` shape; LGA polygons + LGA adjacency via `polygon.touches()`; write to the same fused tables with `tier='lga'`.
+- **Mocks:** `none`
+- **Depends on:** `T7.5`
+
+##### T8.2: SAL and LGA rows in the fused tables do not cross-contaminate `tier` values
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** After running both `extract sal-hierarchy` and `extract lga-hierarchy` against synthetic inputs, every row in `geographic_hierarchy` has `tier ∈ {'sal','lga'}`; no SAL `node_id` appears with `tier='lga'` and vice versa.
+- **Test outline:**
+  - File: `etl/tests/test_build_lga_hierarchy.py`
+  - Name: `test_no_tier_cross_contamination`
+  - Asserts: `SELECT COUNT(*) FROM geographic_hierarchy WHERE tier NOT IN ('sal','lga')` == 0; no `node_id` appears with both tier values.
+- **Implementation outline:**
+  - File(s): `etl/steps/build_sal_hierarchy.py`, `etl/steps/build_lga_hierarchy.py`
+  - Each step writes only its own tier value; add an assertion at end of bake that the invariant holds.
+- **Mocks:** `none`
+- **Depends on:** `T8.1`
+
+##### T8.3: Cross-hierarchy corroboration populates `forecast_diagnostics_corroboration`
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Post-bake, `forecast_diagnostics_corroboration` contains at least one row pairing each LGA against the SAL cluster level whose mean area is closest to LGA scale, with computed `sal_cluster_median_rent`, `lga_rent`, and `divergence_pct`.
+- **Test outline:**
+  - File: `etl/tests/test_corroboration.py`
+  - Name: `test_corroboration_table_populated`
+  - Asserts: synthetic SAL + LGA inputs seeded so divergence is computable; `SELECT COUNT(*) FROM forecast_diagnostics_corroboration` > 0; sample row has all fields non-NULL.
+- **Implementation outline:**
+  - File(s): `etl/steps/forecast_rental_sales.py`
+  - SQL self-join on `cluster_centroids` filtered by tier; pick best matched level by area; compute divergence; INSERT.
+- **Mocks:** `none`
+- **Depends on:** `T8.1`
 
 ### G9: `/explore/:page/:subpage/` multi-page exploration SPA
 
@@ -1257,6 +1944,98 @@ Decoupling production from analyst tooling also resolves the SARIMAX-coverage tr
 <!-- G10 was merged into G9 above (route consolidation, single /explore SPA). See G9 ADR: Router choice for the resolution. -->
 
 
+#### Tickets
+
+##### T9.1: With `VITE_ENABLE_EXPLORE=true`, `/explore/data/forecasts` renders `ForecastsTable` (tracer for G9)
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `VITE_ENABLE_EXPLORE=true bun run build && bun run preview` serves the app; navigating Playwright to `/explore/data/forecasts` renders a table element with at least one row from `forecasts`.
+- **Test outline:**
+  - File: `e2e/explorer.spec.ts`
+  - Name: `/explore/data/forecasts renders with feature flag on`
+  - Asserts: page returns 200; a `<table>` element is present; at least one `<tr>` with forecast data is visible; full-page screenshot captured.
+- **Implementation outline:**
+  - File(s): `bun add react-router-dom@^6 @tanstack/react-table`, `src/router.tsx`, `src/routes/Explorer.tsx`, `src/routes/Explorer.routes.tsx`, `src/components/explorer/ExplorerSideNav.tsx`, `src/components/explorer/data/ForecastsTable.tsx`, `src/lib/explorer-queries.ts`, `Makefile` (`make build-explore`, `make test-e2e-explore`)
+  - Minimum wiring per the G9 References sketch; just the one sub-page (`/explore/data/forecasts`) — other sub-pages land in later tickets.
+- **Mocks:** `none`
+- **Depends on:** `T4.1`
+
+##### T9.2: Production `make build` (flag unset) excludes the Explorer chain
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** `make build` invoked without `VITE_ENABLE_EXPLORE` set produces a `dist/` where `grep -r "ForecastsTable\|DendrogramExplorer\|@tanstack/react-table" dist/assets/*.js` returns zero matches.
+- **Test outline:**
+  - File: `e2e/build-exclusion.spec.ts` OR `scripts/test_build_exclusion.sh`
+  - Name: `production build excludes Explorer assets`
+  - Asserts: subprocess `make build`; subsequent `grep -r ...` returns empty stdout and exit 1 (no matches).
+- **Implementation outline:**
+  - File(s): `src/router.tsx`
+  - The conditional `import.meta.env.VITE_ENABLE_EXPLORE ? (await import(...)).default : []` pattern means Vite tree-shakes the Explorer subtree.
+- **Mocks:** `none`
+- **Depends on:** `T9.1`
+
+##### T9.3: Side-panel `<Link>` to a sub-page updates the URL and renders the matching component
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Clicking the side-panel link labelled "Dendrogram" navigates to `/explore/models/dendrogram` and renders the `DendrogramExplorer` component.
+- **Test outline:**
+  - File: `e2e/explorer.spec.ts`
+  - Name: `side-panel link navigates to /explore/models/dendrogram`
+  - Asserts: after click, `page.url()` ends with `/explore/models/dendrogram`; a `data-testid="dendrogram-explorer"` element is visible.
+- **Implementation outline:**
+  - File(s): `src/components/explorer/ExplorerSideNav.tsx`, `src/components/explorer/models/DendrogramExplorer.tsx`, `src/routes/Explorer.routes.tsx`
+  - Side-nav uses react-router's `<NavLink>` for active-state styling; the dendrogram sub-page is wired into the routes config.
+- **Mocks:** `none`
+- **Depends on:** `T9.1`
+
+##### T9.4: Filter context URL-mirror — pasted URL re-seeds filter state on fresh mount
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** Navigating directly to `/explore/data/forecasts?dwellingType=house&imputationMethod=nowcast_yield_bridge_direct` (a fresh mount with no prior context) renders the table filtered to exactly those rows.
+- **Test outline:**
+  - File: `e2e/explorer.spec.ts`
+  - Name: `pasted URL re-seeds filter state`
+  - Asserts: row count after fresh nav equals the count from a UI-filter equivalent; URL state survives a `page.reload()`.
+- **Implementation outline:**
+  - File(s): `src/components/explorer/ExplorerFilters.tsx`, `src/lib/filter-url-codec.ts`
+  - `FilterContext.Provider` reads initial state from `useSearchParams` on mount; a `useEffect` syncs context → URL via `setSearchParams(..., { replace: true })` with 150ms debounce.
+- **Mocks:** `none`
+- **Depends on:** `T9.1`
+
+##### T9.5: Default LIMIT 1000 enforced; "Show 5000" escalator updates `?limit=5000` and re-runs query
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** On a fresh `/explore/data/forecasts` visit with synthetic data of 7,500 forecast rows, the table shows at most 1,000 rows and a "Showing 1,000 of 7,500" footer; clicking "Show 5,000" updates the URL to `?limit=5000` and the visible row count reaches up to 5,000.
+- **Test outline:**
+  - File: `e2e/explorer.spec.ts`
+  - Name: `default limit and escalator update URL + row count`
+  - Asserts: pre-escalator visible-row count ≤ 1000; footer text matches expected; click "Show 5,000"; URL contains `?limit=5000`; visible row count > 1000 ≤ 5000.
+- **Implementation outline:**
+  - File(s): `src/lib/explorer-queries.ts`, `src/components/explorer/Tables/Footer.tsx`
+  - Queries accept `limit?: number = 1000`; footer reads `searchParams.get('limit')`; escalator buttons call `setSearchParams({...prev, limit: 5000})`.
+- **Mocks:** `none`
+- **Depends on:** `T9.1`
+
+##### T9.6: `e2e/explorer.spec.ts` slug-taxonomy iterates every sub-page and captures artefacts
+
+- [x] **Done**
+- **Cycle:** RED → GREEN → REFACTOR
+- **Behavior:** A `COVERAGE_MATRIX` of `(page, subpage)` tuples drives Playwright through all 9 sub-pages — `data/{forecasts,yields,hierarchy,diagnostics,reconciliation}` + `models/{dendrogram,sarimax,timeseries,yields}` — each producing paired screenshot + log + network-timing artefacts under `e2e-screenshots/`.
+- **Test outline:**
+  - File: `e2e/explorer.spec.ts`
+  - Name: `slug taxonomy across all sub-pages`
+  - Asserts: 9 artefacts exist after the spec run with the slug pattern `E01_DEFAULT-S{NN}_{SLUG}`; each is non-empty; the corresponding `.log` and `.network.json` files exist.
+- **Implementation outline:**
+  - File(s): `e2e/explorer.spec.ts`
+  - Mirror the existing `e2e/routes.spec.ts` slug-taxonomy pattern; iterate `COVERAGE_MATRIX = SECTIONS.flatMap(...)` to build one test per `(engine, page, subpage)` tuple.
+- **Mocks:** `none`
+- **Depends on:** `T9.5`
+
 ## Success Measures
 
 ### Project Quality Bar (CI Gates)
@@ -1286,7 +2065,7 @@ Each measure below is a **mandatory, testable requirement** that the spec's tick
 
 | Gap | Measure | Test / verification | Threshold |
 |-----|---------|---------------------|-----------|
-| G1 | Full bake completes within wall-clock budget | `time make forecast-bake` on default `--n-jobs=-1` | <5 min (MVP); <10 min (v1) |
+| G1 | Full bake completes within wall-clock budget | `time make etl-forecast-bake` on default `--n-jobs=-1` | <5 min (MVP); <10 min (v1) |
 | G1 | Bake is deterministic under fixed seed | `etl/tests/test_forecast_rental_sales.py::test_bake_is_deterministic_under_seed` | two consecutive bakes with `seed=42` produce byte-identical `forecasts` rows |
 | G1 | Bake records its own provenance | `forecast_meta.json` checkpoint written to `data/converted/` per run | contains `seed`, `horizon_q`, `cpi_max_date`, `bake_date`, `library_versions{statsforecast,statsmodels,duckdb}` |
 | G2 | Every eligible rental series yields the expected forecast row count | `SELECT COUNT(*) FROM forecasts WHERE data_type='rental'` | `== (count_of_rental_median_series_with_n_obs >= 40) × horizon_q` |
@@ -1295,7 +2074,7 @@ Each measure below is a **mandatory, testable requirement** that the spec's tick
 | G3 | Every sales suburb gets a forecast or an explicit "no forecast" marker | post-bake query on `forecasts` and `yields` tables | zero sales suburbs with neither `source='suburb'` nor `source='lga_fallback'` (or, if "mark as no-forecast" ADR resolves that way, every such suburb logged with reason) |
 | G3 | Computed gross yields lie in a defensible envelope | bake-time validation on `yields` table | `0.01 ≤ gross_yield ≤ 0.20` for ≥99% of observed rows; outliers flagged with explicit log line and excluded from yield projection |
 | G3 | Yield-bridge arithmetic is correct on a synthetic case | `etl/tests/test_forecast_yield_bridge.py::test_yield_math` | given `rental=$500/wk` and `sale=$520,000`, derived yield = 0.05 ± 1e-9 |
-| G4 | Post-bake DuckDB artifact stays under file-size ceiling | `etl/tests/test_forecast_artifact_size.py` | `public/data/rental_sales.duckdb` ≤ 6 MB |
+| G4 | Post-bake DuckDB artifact stays under file-size ceiling | `etl/tests/test_forecast_storage_schema.py::test_forecasts_artifact_under_size_ceiling` | `public/data/rental_sales.duckdb` ≤ 8 MB (raised from 6 MB once the full bake landed five new tables — `forecasts`, `yields`, `geographic_hierarchy`, `cluster_centroids`, `forecast_diagnostics_corroboration` — onto the published artifact; the bake `_compact_duckdb` step reclaims DuckDB page bloat so the committed file is ~6.3 MB) |
 | G4 | Explicit DDL exists for every forecast-related table | `git grep "CREATE TABLE forecasts"` and `"CREATE TABLE forecast_diagnostics"` in `etl/steps/forecast_rental_sales.py` | one match each; both committed in source, not inferred at runtime |
 | G5 | Frontend renders forecast traces + interval bands for a known suburb | `e2e/forecasts.spec.ts` Playwright spec | screenshot artifact shows dashed forecast trace + shaded band; assertion on Plotly data series count for North Melbourne (`21966`) |
 | G5 | CPI base-period comment matches source-of-truth | `rental-sales-query.ts:111` | comment reads "base 2011-12 = 100" (matches `extract_cpi.py:7`) |
@@ -1320,12 +2099,13 @@ Each measure below is a **mandatory, testable requirement** that the spec's tick
 | G9 | Local-dev build includes the Explorer | `make build-explore` (sets `VITE_ENABLE_EXPLORE=true`) + same `grep` | matches present; Explorer-route asset(s) exist in `dist/assets/*.js` |
 | G9 | All `/explore/:page/:subpage/` sub-pages render under react-router-dom | `e2e/explorer.spec.ts` slug-taxonomy | iterates every `(page, subpage)` ∈ {(`data`, `forecasts`/`yields`/`hierarchy`/`diagnostics`/`reconciliation`), (`models`, `dendrogram`/`sarimax`/`timeseries`/`yields`)}; navigates, asserts non-empty render, captures paired screenshot + log + network-timing artefacts |
 | G9 | Dendrogram explorer is interactive | `src/components/explorer/models/DendrogramExplorer.test.tsx` (Vitest) | synthetic linkage matrix → assert Plotly dendrogram renders; drag the cut-line slider → assert displayed cluster count updates |
-| G9 | `ts_models.duckdb` artefact is built, lazy-loaded, and not requested on `/` or `/explore/data/*` | `etl/tests/test_ts_models_artifact.py` + `e2e/explorer.spec.ts` network-tap | after `make forecast-bake`, `public/data/ts_models.duckdb` exists with non-empty `linkage_matrix`, `sarimax_decompositions`, `sarimax_fitted_params`, `backtest_folds`; e2e network log confirms the file is NOT fetched on `/` or any `data/*` sub-page; IS fetched on first `models/*` mount |
+| G9 | `ts_models.duckdb` artefact is built, lazy-loaded, and not requested on `/` or `/explore/data/*` | `etl/tests/test_ts_models_artifact.py` + `e2e/explorer.spec.ts` network-tap | after `make etl-forecast-bake`, `public/data/ts_models.duckdb` exists with non-empty `linkage_matrix`, `sarimax_decompositions`, `sarimax_fitted_params`, `backtest_folds`; e2e network log confirms the file is NOT fetched on `/` or any `data/*` sub-page; IS fetched on first `models/*` mount |
 | G9 | Empirical cut-level decision is recorded back into G7 | Phase 4 ticket `T_X: validate and persist final cut levels` | post-`/explore/models/dendrogram` inspection, the chosen cut levels are written to the bake step's config (`SAL_CUT_LEVELS`, `LGA_CUT_LEVELS`); bake re-run regenerates `geographic_hierarchy` with the chosen cuts; decision recorded in the spec as an addendum |
+| **E2E** | **Fresh clone delivers the headline outcome: a user clicks a SAL and sees a forecast trace** | `make install && make etl && make dev`; open `/`, select SAL `21966`, read the live Plotly trace array off the chart DOM — codified in `e2e/forecasts.spec.ts` | ≥1 trace whose `name` contains `(forecast)`; that trace has `line.dash === "dash"`; ≥1 interval-band trace (`fill === "tonexty"`). This is the single gate whose absence let "40/40 tickets green" coexist with a blank chart — see the Phase-5 addendum below |
 
-### Domain-Specific Measures
+**Escalators-not-stairs audit (Phase 3):** every measure above is phrased as a falsifiable assertion (`zero rows`, `every row has`, `assert N === M`, `grep returns zero matches`) — none are aspirational ("should aim to", "tries to") or honour-system ("teams agree to"). Every gap G1–G9 has at least one domain-specific measure. The CI Gates in the Project Quality Bar are already-enforced; the domain-specific table extends them.
 
-<!-- TODO: Phase 1f — at least one falsifiable measure per gap. -->
+**Phase-5 addendum — the missing end-to-end gate (retrofitted):** the original Success Measures table tested every *layer* in isolation (the bake writes rows, the codec maps rows, the component renders rows) but had no measure for the *composition* — a user opening the app and seeing a forecast. That gap let the spec reach "40/40 tickets" while the production chart stayed blank, because: (a) `make etl-forecast-bake` did not exist as a target, so the bake never ran end-to-end on real data; (b) `queryRegionForecast` was exported and unit-tested but never *called* by `SuburbPlot.tsx`; (c) the bake's `freq="QS"` put forecast dates on a Jan/Apr/Jul/Oct grid while real ABS data is Mar/Jun/Sep/Dec; (d) sales forecasts were silently empty because the yield-bridge SQL keyed on a `dwelling_type` shape that doesn't exist in production data. The `E2E` row above is the falsifiable gate that now catches that whole class of "green tests, dead feature" failure. Every layer-level measure remains necessary; the E2E row makes them jointly *sufficient*.
 
 ## Negative Measures
 

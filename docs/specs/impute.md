@@ -122,6 +122,38 @@ The 20 remaining empty cells now sort cleanly into three causes:
   missing regions show up *inside* a populated cell as a coverage % below
   100 — the "Coverage" column on each row flags those.
 
+## Imputation status — BUILT (all 20 cells)
+
+The 20 empty cells above describe **vendor** coverage. They are now all
+synthesised by `etl/steps/impute_coverage.py` (`make etl-impute` /
+`uv run -m etl impute`), which writes the imputed cells back into
+`rental_sales` tagged `source_file='imputed:...'` so they stay
+distinguishable from vendor observations. After the impute step the
+coverage-matrix query below returns **36/36 populated, 0 empty**.
+
+| Recovery class | Cells | Method | Imputed rows (real data) |
+|---|---:|---|---:|
+| **A** — rental per-dwelling all-bedrooms rollup | 4 | count-weighted mean of the per-bedroom children: `Σ(count_b·median_b)/Σ(count_b)` | 88,010 |
+| **C** — sales SAL all-dwellings rollup | 1 | combine observed `{unit,house}×all` sale medians, weighted by the Class-A rental dwelling-count mix | 8,265 |
+| **B** — sales SAL per-bedroom disaggregation | 6 | `sale_bedroom = sale_dwelling_all × (rental_bedroom / rental_dwelling_all)` | 12,867 |
+| **D** — sales LGA roll-up from SAL | 9 | equal-weight mean of member SALs via a geopandas SAL→LGA spatial crosswalk (2,944 mappings) | 6,320 |
+| **Total** | **20** | | **115,462** |
+
+Imputers run threaded (A → C → B → D): each sees observed rows plus every
+earlier class's output, so C/B build on A's rental dwelling-all rollup and
+D rolls up the sales-SAL quadrant B/C completed. The step is idempotent
+(strips prior `imputed:%` rows before recomputing). Downstream, the
+forecast bake's yield bridge filters `source_file NOT LIKE 'imputed:%'`
+so yields stay computed from observations only; the SARIMAX bake DOES
+forecast the imputed rental dwelling-all series (rental forecasts
+4,623 → 5,952). Verified end-to-end by `make ci`.
+
+**Known simplification (Class D):** the roll-up is an equal-weight mean of
+suburb medians. This section's prose calls for a *population-weighted*
+roll-up; no per-SAL population or transaction-count is available in the
+current inputs, so equal-weight is the documented MVP and
+population-weighting is a future refinement.
+
 ## Full Cartesian-product table (36 rows)
 
 `Distinct Regions` is the count of unique geographies present in that cell.

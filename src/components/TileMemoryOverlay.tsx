@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { DbStatus } from "@/hooks/useDuckDb";
 import {
 	type FrameStats,
 	getFrameStatsSnapshot,
@@ -34,7 +35,7 @@ const FRAME_CHART_CAP_MS = 120;
 
 const FORMAT_MB = (bytes: number) => `${(bytes / 1_048_576).toFixed(2)} MB`;
 
-export const TileMemoryOverlay = () => {
+export const TileMemoryOverlay = ({ status }: { status: DbStatus }) => {
 	// Default collapsed — debug-only widget, not always-visible UI.
 	const [collapsed, setCollapsed] = useState(true);
 	const { theme } = useOverlayTheme();
@@ -158,6 +159,33 @@ export const TileMemoryOverlay = () => {
 			</header>
 			{!collapsed && (
 				<div className="mt-1.5 space-y-3">
+					{/* DuckDB tables section — moved here from the ControlPanel.
+						The names and row counts are diagnostic info, not user-
+						facing chrome, so they belong with the rest of the
+						debug overlay's stats. */}
+					{status.state === "ready" && status.tables.length > 0 && (
+						<section data-testid="debug-db-tables">
+							<h3 className="mb-1 font-semibold text-neutral-700 dark:text-neutral-300">
+								DuckDB tables
+							</h3>
+							<ul className="space-y-0.5 text-[10px] text-neutral-600 dark:text-neutral-400">
+								{status.tables.map((t) => (
+									<li
+										key={t.name}
+										className="flex items-baseline justify-between gap-2"
+									>
+										<code className="rounded bg-neutral-100 px-1 py-0.5 dark:bg-neutral-800 dark:text-neutral-200">
+											{t.name}
+										</code>
+										<span className="tabular-nums">
+											{t.rows.toLocaleString()} rows
+										</span>
+									</li>
+								))}
+							</ul>
+						</section>
+					)}
+
 					{/* Tile memory section */}
 					<section>
 						<h3 className="mb-1 flex items-center gap-1.5 font-semibold text-neutral-700 dark:text-neutral-300">

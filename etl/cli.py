@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 from etl.config import (
@@ -40,12 +41,18 @@ from etl.config import (
 )
 from etl.logging_setup import configure
 from etl.steps import (
+    build_cluster_linkage,
+    build_lga_hierarchy,
+    build_sal_hierarchy,
     build_suburb_mappings,
     extract_cpi,
     extract_isochrones,
     extract_ptv,
     extract_rental_sales,
     extract_sal,
+    extract_school_zones,
+    forecast_rental_sales,
+    impute_coverage,
     publish_commute_hulls,
     publish_lga,
     publish_region_centroids,
@@ -56,6 +63,7 @@ from etl.steps import (
     tile_isochrone,
     tile_ptv,
     tile_sal,
+    tile_school_zones,
 )
 
 # ---- Default file paths (single source of truth for CLI defaults) -----------
@@ -76,6 +84,23 @@ SUBURB_NAMES_JSON = PUBLIC_DATA_DIR / "suburb_names.json"
 LGA_NAMES_JSON = PUBLIC_DATA_DIR / "lga_names.json"
 DATA_VERSION_JSON = PUBLIC_DATA_DIR / "version.json"
 CPI_PARQUET = CONVERTED_DIR / "cpi_melbourne.parquet"
+# School-zone catchment polygons (DataVic 2026). Source lives outside the
+# project tree by default so it stays under one upstream owner; override
+# with --source-dir if mirrored elsewhere.
+SCHOOL_ZONES_SOURCE_DIR = Path(
+    "/Users/joshpeak/play/isochrones/data/originals/schools/dv398_DataVic_School_Zones_2026"
+)
+SCHOOL_ZONES_PARQUET = CONVERTED_DIR / "school_zones_2026.parquet"
+# Frontend reads tiles from `public/data/tiles/school_zones_<level>/...`,
+# same TILES_DIR root the SAL + iso + PTV tile dirs already use.
+FORECASTS_META_JSON = CONVERTED_DIR / "forecasts_meta.json"
+TS_MODELS_DUCKDB = CONVERTED_DIR / "ts_models.duckdb"
+
+# Default agglomerative-hierarchy cut levels (G7 / G8). 5/10/15 clusters span
+# the granularity range from city-wide groupings down to neighbourhood-scale.
+SAL_DEFAULT_CUT_LEVELS: tuple[int, ...] = (5, 10, 15)
+# LGA defaults match the coarser scale (80 Victorian LGAs vs ~3000 SALs).
+LGA_DEFAULT_CUT_LEVELS: tuple[int, ...] = (3, 5, 10)
 
 ISO_FOOT_DIR = ISOCHRONES_ORIGINALS / "foot"
 ISO_FOOT_PARQUET = CONVERTED_DIR / "isochrones_foot.parquet"
@@ -149,6 +174,23 @@ def cmd_tile_isochrone(args: argparse.Namespace) -> None:
         duration=args.duration,
         output_dir=args.output,
         mode=args.mode,
+        min_zoom=args.min_zoom,
+        max_zoom=args.max_zoom,
+    )
+
+
+def cmd_extract_school_zones(args: argparse.Namespace) -> None:
+    extract_school_zones.run(
+        source_dir=args.source_dir,
+        output_parquet=args.output,
+    )
+
+
+def cmd_tile_school_zones(args: argparse.Namespace) -> None:
+    tile_school_zones.run(
+        input_parquet=args.input,
+        level=args.level,
+        output_dir=args.output,
         min_zoom=args.min_zoom,
         max_zoom=args.max_zoom,
     )
@@ -234,6 +276,33 @@ def cmd_extract_cpi(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_extract_sal_hierarchy(args: argparse.Namespace) -> None:
+    build_sal_hierarchy.run(
+        input_sal_parquet=args.input_sal_parquet,
+        output_duckdb=args.output_duckdb,
+        ts_models_duckdb=args.ts_models_duckdb,
+        cut_levels=tuple(args.cut_levels),
+    )
+
+
+def cmd_extract_lga_hierarchy(args: argparse.Namespace) -> None:
+    build_lga_hierarchy.run(
+        input_lga_parquet=args.input_lga_parquet,
+        output_duckdb=args.output_duckdb,
+        ts_models_duckdb=args.ts_models_duckdb,
+        cut_levels=tuple(args.cut_levels),
+    )
+
+
+def cmd_build_cluster_linkage(args: argparse.Namespace) -> None:
+    build_cluster_linkage.run(
+        sal_geojson=args.sal_geojson,
+        lga_geojson=args.lga_geojson,
+        observed_regions=args.observed_regions,
+        output_duckdb=args.output_duckdb,
+    )
+
+
 def cmd_publish_suburb_mappings(args: argparse.Namespace) -> None:
     build_suburb_mappings.build_suburb_mappings(
         sal_parquet=args.sal_parquet,
@@ -274,6 +343,35 @@ def cmd_publish_region_names(args: argparse.Namespace) -> None:
 
 def cmd_publish_version(args: argparse.Namespace) -> None:
     publish_version.run(output=args.output)
+
+
+def cmd_forecast_bake(args: argparse.Namespace) -> None:
+    pinned_today: date | None = None
+    if args.today_iso:
+        pinned_today = date.fromisoformat(args.today_iso)
+    forecast_rental_sales.run(
+        output_duckdb=args.output_duckdb,
+        meta_output=args.meta_output,
+        today=pinned_today,
+        horizon_q=args.horizon_q,
+        n_jobs=args.n_jobs,
+        seed=args.seed,
+        backtest_mode=args.backtest_mode,
+    )
+
+
+def cmd_forecast_status(args: argparse.Namespace) -> None:
+    count = forecast_rental_sales.status_row_count(output_duckdb=args.output_duckdb)
+    print(count)
+
+
+def cmd_impute(args: argparse.Namespace) -> None:
+    impute_coverage.run(
+        input_parquet=args.input_parquet,
+        output_duckdb=args.output_duckdb,
+        sal_parquet=args.sal_parquet,
+        lga_geojson=args.lga_geojson,
+    )
 
 
 # --- `etl all` orchestration -------------------------------------------------
@@ -523,6 +621,122 @@ def build_parser() -> argparse.ArgumentParser:
         help="DuckDB to attach the `cpi` table into (must already exist)",
     )
     cpi_extract.set_defaults(func=cmd_extract_cpi)
+
+    sal_hierarchy_extract = extract_sub.add_parser(
+        "sal-hierarchy",
+        help=(
+            "Build the SAL agglomerative geographic hierarchy (G7). "
+            "Writes the linkage matrix to ts_models.duckdb and per-(SAL, "
+            "cut_level) cluster assignments into geographic_hierarchy "
+            "inside rental_sales.duckdb."
+        ),
+    )
+    sal_hierarchy_extract.add_argument(
+        "--input-sal-parquet",
+        type=Path,
+        default=SAL_PARQUET,
+        help="State-filtered SAL parquet (produced by `etl extract sal`).",
+    )
+    sal_hierarchy_extract.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="DuckDB where `geographic_hierarchy` rows are written.",
+    )
+    sal_hierarchy_extract.add_argument(
+        "--ts-models-duckdb",
+        type=Path,
+        default=TS_MODELS_DUCKDB,
+        help="DuckDB where the scipy linkage matrix is persisted.",
+    )
+    sal_hierarchy_extract.add_argument(
+        "--cut-levels",
+        type=int,
+        nargs="+",
+        default=list(SAL_DEFAULT_CUT_LEVELS),
+        help=(
+            "Cluster counts at which to persist hierarchy cuts. "
+            "Default: 5 10 15 — spans city-wide to neighbourhood scale."
+        ),
+    )
+    sal_hierarchy_extract.set_defaults(func=cmd_extract_sal_hierarchy)
+
+    lga_hierarchy_extract = extract_sub.add_parser(
+        "lga-hierarchy",
+        help=(
+            "Build the LGA agglomerative geographic hierarchy (G8). "
+            "Writes the linkage matrix to ts_models.duckdb and per-(LGA, "
+            "cut_level) rows into geographic_hierarchy with tier='lga' "
+            "inside rental_sales.duckdb."
+        ),
+    )
+    lga_hierarchy_extract.add_argument(
+        "--input-lga-parquet",
+        type=Path,
+        default=LGA_PARQUET,
+        help="LGA boundary parquet (produced by the LGA extract step).",
+    )
+    lga_hierarchy_extract.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="DuckDB where `geographic_hierarchy` (tier='lga') rows land.",
+    )
+    lga_hierarchy_extract.add_argument(
+        "--ts-models-duckdb",
+        type=Path,
+        default=TS_MODELS_DUCKDB,
+        help="DuckDB where the scipy linkage matrix (tier='lga') is persisted.",
+    )
+    lga_hierarchy_extract.add_argument(
+        "--cut-levels",
+        type=int,
+        nargs="+",
+        default=list(LGA_DEFAULT_CUT_LEVELS),
+        help=(
+            "Cluster counts at which to persist hierarchy cuts. "
+            "Default: 3 5 10 — matches the coarser LGA scale."
+        ),
+    )
+    lga_hierarchy_extract.set_defaults(func=cmd_extract_lga_hierarchy)
+
+    # HDBSCAN + EVoC centroid clustering — replaces the K-cut hierarchy
+    # snapshot as the authoritative dendrogram source. Reads geojson
+    # centroids filtered by observed_regions.json.
+    cluster_linkage_extract = extract_sub.add_parser(
+        "cluster-linkage",
+        help=(
+            "Build HDBSCAN + EVoC linkage trees over SAL/LGA polygon "
+            "centroids (target subset only). Writes (tier, method, "
+            "node_id, parent_id, size, distance, is_leaf) rows into "
+            "`cluster_linkage`."
+        ),
+    )
+    cluster_linkage_extract.add_argument(
+        "--sal-geojson",
+        type=Path,
+        default=SAL_GEOJSON,
+        help="SAL polygon GeoJSON (code field SAL_CODE21).",
+    )
+    cluster_linkage_extract.add_argument(
+        "--lga-geojson",
+        type=Path,
+        default=LGA_GEOJSON,
+        help="LGA polygon GeoJSON (code field LGA_CODE24).",
+    )
+    cluster_linkage_extract.add_argument(
+        "--observed-regions",
+        type=Path,
+        default=PUBLIC_DATA_DIR / "observed_regions.json",
+        help="JSON manifest of polygons with observed source data.",
+    )
+    cluster_linkage_extract.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="DuckDB where the `cluster_linkage` table is created/updated.",
+    )
+    cluster_linkage_extract.set_defaults(func=cmd_build_cluster_linkage)
 
     iso_extract = extract_sub.add_parser(
         "isochrones",
@@ -795,6 +1009,53 @@ def build_parser() -> argparse.ArgumentParser:
     iso_tile.add_argument("--max-zoom", type=int, default=12, help="Maximum zoom level")
     iso_tile.set_defaults(func=cmd_tile_isochrone)
 
+    school_zones_extract = extract_sub.add_parser(
+        "school-zones",
+        help=(
+            "Concatenate DataVic 2026 school-zone GeoJSONs into one "
+            "GeoParquet with a derived `level` column."
+        ),
+    )
+    school_zones_extract.add_argument(
+        "--source-dir",
+        type=Path,
+        default=SCHOOL_ZONES_SOURCE_DIR,
+        help="Directory of *.geojson school-zone files.",
+    )
+    school_zones_extract.add_argument(
+        "--output",
+        type=Path,
+        default=SCHOOL_ZONES_PARQUET,
+        help="Output GeoParquet path.",
+    )
+    school_zones_extract.set_defaults(func=cmd_extract_school_zones)
+
+    school_zones_tile = tile_sub.add_parser(
+        "school-zones",
+        help="Tile one school-zone level (`primary`, `secondary_year7`, ...) into MVT.",
+    )
+    school_zones_tile.add_argument(
+        "--input",
+        type=Path,
+        default=SCHOOL_ZONES_PARQUET,
+        help="Merged school-zones GeoParquet.",
+    )
+    school_zones_tile.add_argument(
+        "--level",
+        type=str,
+        required=True,
+        help="Level slug (e.g. 'primary', 'secondary_year7').",
+    )
+    school_zones_tile.add_argument(
+        "--output",
+        type=Path,
+        default=TILES_DIR,
+        help="Root output dir (tiles land under <output>/school_zones_<level>/).",
+    )
+    school_zones_tile.add_argument("--min-zoom", type=int, default=9)
+    school_zones_tile.add_argument("--max-zoom", type=int, default=11)
+    school_zones_tile.set_defaults(func=cmd_tile_school_zones)
+
     ptv_lines_tile = tile_sub.add_parser("ptv-lines", help="Tile PTV line parquet to MVT XYZ tiles")
     ptv_lines_tile.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
     ptv_lines_tile.set_defaults(func=cmd_tile_ptv_lines)
@@ -802,6 +1063,133 @@ def build_parser() -> argparse.ArgumentParser:
     ptv_stops_tile = tile_sub.add_parser("ptv-stops", help="Tile PTV stop parquet to MVT XYZ tiles")
     ptv_stops_tile.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
     ptv_stops_tile.set_defaults(func=cmd_tile_ptv_stops)
+
+    # `etl forecast <action>` — G1 tracer surface. `bake` body lands in T1.3.
+    forecast_p = top_sub.add_parser(
+        "forecast",
+        help=(
+            "SARIMAX-driven forecasts for rental / sales / yield series. "
+            "Reads observed history + CPI from rental_sales.duckdb, writes "
+            "the `forecasts` table back into the same file."
+        ),
+    )
+    forecast_p.set_defaults(func=_help(forecast_p))
+    forecast_sub = forecast_p.add_subparsers(dest="forecast_cmd", required=False)
+
+    bake_forecast = forecast_sub.add_parser(
+        "bake",
+        help=(
+            "Fit per-series AutoARIMA with CPI exog and drop+recreate the "
+            "`forecasts` table inside the existing rental_sales DuckDB."
+        ),
+    )
+    bake_forecast.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="DuckDB to bake forecasts into (must already contain `rental_sales` + `cpi`)",
+    )
+    bake_forecast.add_argument(
+        "--meta-output",
+        type=Path,
+        default=FORECASTS_META_JSON,
+        help=(
+            "Provenance JSON written after a successful bake (seed, bake_date, "
+            "today_at_bake, cpi_max_date, library_versions)."
+        ),
+    )
+    bake_forecast.add_argument(
+        "--horizon-q",
+        type=int,
+        default=0,
+        help=(
+            "Forward-forecast horizon in quarters past `today`. MVP default 0 "
+            "(nowcast-only per the G2 ADR); set N>0 for local forward-forecast "
+            "experiments in /explore/models/timeseries."
+        ),
+    )
+    bake_forecast.add_argument(
+        "--today-iso",
+        type=str,
+        default=None,
+        help=(
+            "ISO-8601 date pinning `today` for deterministic re-bakes. "
+            "Drives the per-series nowcast horizon `(today - last_observed)`. "
+            "Default: system clock."
+        ),
+    )
+    bake_forecast.add_argument(
+        "--n-jobs",
+        type=int,
+        default=-1,
+        help="Parallel-fit workers passed to statsforecast (-1 = all cores)",
+    )
+    bake_forecast.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Deterministic seed for the bake (statsforecast + numpy)",
+    )
+    bake_forecast.add_argument(
+        "--backtest-mode",
+        choices=("single-fold", "rolling-cv"),
+        default="single-fold",
+        help=(
+            "Holdout strategy for diagnostics. `single-fold` (MVP default) "
+            "holds out the final 4 quarters per series; `rolling-cv` runs "
+            "expanding-window cross-validation via "
+            "`StatsForecast.cross_validation()`."
+        ),
+    )
+    bake_forecast.set_defaults(func=cmd_forecast_bake)
+
+    status_forecast = forecast_sub.add_parser(
+        "status",
+        help="Print the current `forecasts` table row count (0 when absent)",
+    )
+    status_forecast.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="DuckDB to inspect (default: the production rental_sales artifact)",
+    )
+    status_forecast.set_defaults(func=cmd_forecast_status)
+
+    # `etl impute` — synthesise the 20 missing coverage-matrix cells
+    # (docs/specs/impute.md) back into rental_sales. Runs between
+    # `extract rental-sales` and the hierarchy/forecast steps.
+    impute_p = top_sub.add_parser(
+        "impute",
+        help=(
+            "Synthesise the missing (market, region, dwelling, bedrooms) "
+            "coverage-matrix cells into rental_sales (docs/specs/impute.md)"
+        ),
+    )
+    impute_p.add_argument(
+        "--input-parquet",
+        type=Path,
+        default=RENTAL_SALES_PARQUET,
+        help="rental_sales parquet to read + rewrite in place with imputed rows",
+    )
+    impute_p.add_argument(
+        "--output-duckdb",
+        type=Path,
+        default=RENTAL_SALES_DUCKDB,
+        help="DuckDB whose `rental_sales` table is CREATE-OR-REPLACEd with the union",
+    )
+    impute_p.add_argument(
+        "--sal-parquet",
+        type=Path,
+        default=SAL_PARQUET,
+        help="SAL boundary parquet — Class D builds the SAL->LGA crosswalk from this",
+    )
+    impute_p.add_argument(
+        "--lga-geojson",
+        type=Path,
+        default=LGA_GEOJSON,
+        help="LGA boundary GeoJSON — the other half of the SAL->LGA crosswalk",
+    )
+    impute_p.set_defaults(func=cmd_impute)
 
     # `etl all`
     all_p = top_sub.add_parser(

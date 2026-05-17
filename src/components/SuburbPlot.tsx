@@ -1,86 +1,34 @@
-import * as PlotlyMod from "plotly.js-cartesian-dist-min";
-import {
-	type ComponentType,
-	type CSSProperties,
-	useEffect,
-	useMemo,
-	useState,
-} from "react";
-import * as FactoryMod from "react-plotly.js/factory";
+import { useEffect, useMemo, useState } from "react";
+
+import { ModelDetailsPanel } from "@/components/explorer/ModelDetailsPanel";
+import { Plot } from "@/lib/plotly";
 import type { RegionSelection } from "@/lib/region";
 import {
 	type CpiPoint,
+	forecastSeriesKey,
 	queryCpiSeries,
+	queryRegionForecastGrouped,
 	queryRegionTimeSeries,
 	type SuburbTimeSeries,
 } from "@/lib/rental-sales-query";
 import { lookupSuburb } from "@/lib/suburb-mappings";
+import {
+	buildForecastTrace,
+	buildImputedBandTrace,
+	colorForIndex,
+	DEFAULT_INTERVALS,
+	recoverSigmaFromForecast,
+	seriesColorKey,
+	traceLabel,
+} from "@/lib/suburb-plot-traces";
 import { type OverlayTheme, useOverlayTheme } from "@/lib/theme";
+import {
+	buildYieldSeries,
+	buildYieldTraces,
+	type RegionMarketSeries,
+} from "@/lib/yield-ratio";
 
-// Plotly's full bundle is ~3 MB; cartesian-dist-min is ~700 KB and includes
-// the scatter/line traces we need. Pair with react-plotly.js via its factory
-// so we don't pull the full plotly.js dist that the default react-plotly.js
-// import would drag in.
-//
-// Both deps are CJS/UMD. Vite's esbuild interop hands them back as namespace
-// objects with the real value on `.default`, so a plain `import x from …`
-// resolves to the namespace, not the function — calling it then throws
-// "createPlotlyComponent is not a function". Unwrap explicitly so the
-// runtime shape matches the type.
-type PlotProps = {
-	data: unknown[];
-	layout?: unknown;
-	config?: unknown;
-	useResizeHandler?: boolean;
-	style?: CSSProperties;
-};
-type PlotlyFactory = (P: unknown) => ComponentType<PlotProps>;
-
-// Vite's esbuild interop double-wraps `react-plotly.js/factory`: the namespace
-// is `{ default: { default: factoryFn } }` because the package's compiled CJS
-// already has `__esModule: true` + `exports.default = fn`, and Vite then
-// re-wraps that whole `module.exports` under another `default`. Plotly's UMD
-// is single-wrapped (top-level is the Plotly object). Recurse into `.default`
-// chains until we find the predicate match — covers both shapes safely.
-const findInDefaults = <T,>(
-	start: unknown,
-	pred: (v: unknown) => boolean,
-): T => {
-	let cur: unknown = start;
-	for (let i = 0; i < 4 && cur != null; i++) {
-		if (pred(cur)) return cur as T;
-		cur = (cur as { default?: unknown }).default;
-	}
-	throw new Error("findInDefaults: no value matched predicate");
-};
-
-const Plotly = findInDefaults<unknown>(
-	PlotlyMod,
-	(v) => typeof v === "object" && v !== null && "newPlot" in v,
-);
-const createPlotlyComponent = findInDefaults<PlotlyFactory>(
-	FactoryMod,
-	(v) => typeof v === "function",
-);
-const Plot = createPlotlyComponent(Plotly);
-
-type View = "rental" | "sales";
-
-const capitalize = (s: string): string =>
-	s.length === 0 ? s : `${s[0]?.toUpperCase() ?? ""}${s.slice(1)}`;
-
-// Compose a human-readable trace name. The source data carries a coarse
-// `(dwellingType, bedrooms)` pair where either axis can be "all" meaning
-// "rolled-up across this dimension". Map the four cases to readable labels
-// instead of e.g. raw "house/all" strings.
-const traceLabel = (s: SuburbTimeSeries): string => {
-	const dt = s.dwellingType;
-	const br = s.bedrooms;
-	if (dt === "all" && br === "all") return "All dwellings";
-	if (br === "all") return capitalize(dt);
-	if (dt === "all") return `All · ${br} br`;
-	return `${capitalize(dt)} · ${br} br`;
-};
+type View = "rental" | "sales" | "yield" | "models";
 
 // Sort key: roll-ups first ("All dwellings"), then by dwelling type, then
 // numeric bedrooms ascending. Keeps the legend reading top-to-bottom from
@@ -97,14 +45,40 @@ const compareSeries = (a: SuburbTimeSeries, b: SuburbTimeSeries): number => {
 	return a0 - b0 || a1.localeCompare(b1) || a2 - b2;
 };
 
-const buildTraces = (subset: SuburbTimeSeries[]) =>
-	[...subset].sort(compareSeries).map((s) => ({
-		x: s.points.map((p) => p.ts),
-		y: s.points.map((p) => p.value),
-		type: "scatter" as const,
-		mode: "lines" as const,
-		name: traceLabel(s),
-	}));
+// Map seriesColorKey → palette colour, indexed by sorted position. The same
+// map is consumed by buildTraces / buildForecastTrace / buildImputedBandTrace
+// so a series's observed line, its imputed-σ fill, and its forecast
+// continuation all share one colour. Dash patterns carry the orthogonal
+// provenance signal (solid = observed, dot = imputed, longdash = forecast).
+const buildColorMap = (subset: SuburbTimeSeries[]): Map<string, string> => {
+	const sorted = [...subset].sort(compareSeries);
+	return new Map(sorted.map((s, i) => [seriesColorKey(s), colorForIndex(i)]));
+};
+
+// Trace builder for the observed/imputed historical lines.
+//   - solid (no dash)   when the series is vendor-observed
+//   - "dot" (short dot) when the series is one of the four impute classes
+// Colour comes from the shared colour map so the forecast continuation,
+// observed history, and σ band line up visually as one trace family.
+const buildTraces = (
+	subset: SuburbTimeSeries[],
+	colorMap: Map<string, string>,
+) =>
+	[...subset].sort(compareSeries).map((s) => {
+		const base = traceLabel(s);
+		const color = colorMap.get(seriesColorKey(s));
+		return {
+			x: s.points.map((p) => p.ts),
+			y: s.points.map((p) => p.value),
+			type: "scatter" as const,
+			mode: "lines" as const,
+			name: s.imputed ? `${base} · imputed` : base,
+			line: {
+				...(color ? { color } : {}),
+				...(s.imputed ? { dash: "dot" as const } : {}),
+			},
+		};
+	});
 
 // CPI is region-independent — share a single cached promise across every
 // SuburbPlot mount. Reusing the same Date objects across mounts also lets
@@ -159,18 +133,61 @@ const plotlyTheme = (theme: OverlayTheme) => {
 	};
 };
 
-export default function SuburbPlot({ region }: { region: RegionSelection }) {
+// `intervals` is a typed prop boundary per the G5 ADR — the map route never
+// sets it (default [80, 95] applies); analyst surfaces like the /explore
+// pages can pass non-default values, e.g. `[80]` for tighter bands or `[]`
+// to suppress them entirely.
+//
+// `view` pins the chart to one side and hides the rental/sales tab UI; the
+// map route omits it (tabbed default) and the /explore RegionDualPlot
+// stacks two pinned mounts (one rental, one sales) on the same page.
+export default function SuburbPlot({
+	region,
+	intervals = DEFAULT_INTERVALS,
+	view: forcedView,
+}: {
+	region: RegionSelection;
+	intervals?: ReadonlyArray<80 | 95>;
+	view?: View;
+}) {
 	const [series, setSeries] = useState<SuburbTimeSeries[] | null>(null);
 	const [cpi, setCpi] = useState<CpiPoint[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [view, setView] = useState<View>("rental");
+	const [internalView, setInternalView] = useState<View>("rental");
+	const view = forcedView ?? internalView;
 	const { theme } = useOverlayTheme();
 
 	useEffect(() => {
 		setError(null);
 		setSeries(null);
-		queryRegionTimeSeries(region.kind, region.code)
-			.then(setSeries)
+		// Run the observed-series and forecast queries in parallel, then merge
+		// the forecast bucket onto each series by (dataType, dwellingType,
+		// bedrooms). A series with no forecast row in the bake stays at
+		// `forecast: undefined` and renders observed-only — matches the
+		// fallback the trace builder already expects.
+		Promise.all([
+			queryRegionTimeSeries(region.kind, region.code),
+			queryRegionForecastGrouped(region.kind, region.code).catch(
+				(err: unknown) => {
+					// Forecasts are an additive overlay — if the forecasts table is
+					// missing (pre-bake duckdb), warn but don't fail the chart.
+					console.warn("forecast load failed:", err);
+					return new Map<
+						string,
+						ReturnType<(typeof Array.prototype)[number]>
+					>();
+				},
+			),
+		])
+			.then(([base, forecastsByKey]) => {
+				const merged = base.map((s) => ({
+					...s,
+					forecast: forecastsByKey.get(
+						forecastSeriesKey(s.dataType, s.dwellingType, s.bedrooms),
+					),
+				}));
+				setSeries(merged);
+			})
 			.catch((err: unknown) => {
 				setError(err instanceof Error ? err.message : String(err));
 			});
@@ -198,20 +215,59 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 		return { rental: r, sales: s };
 	}, [series]);
 
-	// Auto-flip to whichever tab actually has data when the suburb changes.
-	// e.g. some suburbs have rental-only, some sales-only.
-	useEffect(() => {
-		if (!series) return;
-		if (view === "rental" && rental.length === 0 && sales.length > 0) {
-			setView("sales");
-		} else if (view === "sales" && sales.length === 0 && rental.length > 0) {
-			setView("rental");
-		}
-	}, [series, view, rental.length, sales.length]);
+	// Derived yield series — one per (dwelling, bedrooms) slice that has
+	// BOTH a rental and a sales series. Computed via the pure
+	// `buildYieldSeries` helper; the composite qualifier per series
+	// drives the dash style (observed/partially imputed/fully imputed/
+	// forecast). See docs/GLOSSARY.md § yield_ratio.
+	const yields = useMemo(() => {
+		const toMarket = (s: SuburbTimeSeries): RegionMarketSeries => ({
+			dwellingType: s.dwellingType,
+			bedrooms: s.bedrooms,
+			imputed: s.imputed,
+			points: s.points,
+			...(s.forecast
+				? {
+						forecast: {
+							points: s.forecast.map((p) => ({
+								ts: p.ts,
+								value: p.yHat,
+							})),
+						},
+					}
+				: {}),
+		});
+		return buildYieldSeries(rental.map(toMarket), sales.map(toMarket));
+	}, [rental, sales]);
 
+	// Auto-flip to whichever tab actually has data when the suburb changes.
+	// e.g. some suburbs have rental-only, some sales-only. Skipped when the
+	// view is forced — the dual-plot caller wants the empty side to render
+	// its own "no data" placeholder, not silently retarget.
+	useEffect(() => {
+		if (!series || forcedView !== undefined) return;
+		if (internalView === "rental" && rental.length === 0 && sales.length > 0) {
+			setInternalView("sales");
+		} else if (
+			internalView === "sales" &&
+			sales.length === 0 &&
+			rental.length > 0
+		) {
+			setInternalView("rental");
+		}
+	}, [series, internalView, forcedView, rental.length, sales.length]);
+
+	// The `suburb-plot-${view}-ready` testid is the e2e contract: it appears
+	// on every terminal state (error, no-region-data, chart, no-view-data)
+	// and is absent during loading. The /explore matrix waits on it to know
+	// each panel has finished rendering whatever it's going to render.
 	if (error) {
 		return (
-			<div className="px-3 py-2 text-xs text-red-700 dark:text-red-300">
+			<div
+				data-testid={`suburb-plot-${view}-ready`}
+				data-state="error"
+				className="px-3 py-2 text-xs text-red-700 dark:text-red-300"
+			>
 				Query error: {error}
 			</div>
 		);
@@ -225,7 +281,11 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 	}
 	if (series.length === 0) {
 		return (
-			<div className="px-3 py-2 text-xs text-neutral-500 dark:text-neutral-400">
+			<div
+				data-testid={`suburb-plot-${view}-ready`}
+				data-state="empty-region"
+				className="px-3 py-2 text-xs text-neutral-500 dark:text-neutral-400"
+			>
 				No rental/sales rows for this suburb (SAL_CODE21 not found in any
 				geospatial_codes group). Some real-estate market areas don't map 1:1
 				onto ABS suburb codes.
@@ -233,17 +293,88 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 		);
 	}
 
-	const activeSeries = view === "rental" ? rental : sales;
-	const dataTraces = buildTraces(activeSeries);
+	const activeSeries =
+		view === "rental" ? rental : view === "sales" ? sales : [];
+	// Shared palette index for this view. A series's observed line, its
+	// imputed-σ band, and its forecast continuation all read the same
+	// colour out of this map. For yield view: index off the yield series'
+	// own (dwelling, bedrooms) so colours stay stable between rental/
+	// sales/yield tabs for the same slice.
+	const colorMap =
+		view === "yield"
+			? buildColorMap(
+					yields.map(
+						(y): SuburbTimeSeries => ({
+							dataType: "rental",
+							dwellingType: y.dwellingType,
+							bedrooms: y.bedrooms,
+							imputed: false,
+							points: [],
+						}),
+					),
+				)
+			: buildColorMap(activeSeries);
+	const colorOf = (s: SuburbTimeSeries): string | undefined =>
+		colorMap.get(seriesColorKey(s));
+	const colorOfSlice = (s: {
+		dwellingType: string;
+		bedrooms: string;
+	}): string | undefined =>
+		colorMap.get(
+			seriesColorKey({
+				dwellingType: s.dwellingType,
+				bedrooms: s.bedrooms,
+			} as SuburbTimeSeries),
+		);
+	const dataTraces =
+		view === "yield"
+			? buildYieldTraces(yields, colorOfSlice)
+			: buildTraces(activeSeries, colorMap);
+	// Long-dash forecast continuation lines + matching-hue interval bands.
+	// Pure-TS construction in suburb-plot-traces.ts so the shape is unit-
+	// tested without Plotly (see src/lib/suburb-plot-traces.test.ts).
+	const forecastTraces =
+		view === "yield"
+			? []
+			: activeSeries.flatMap((s) =>
+					buildForecastTrace(s, intervals, colorOf(s)),
+				);
+	// ±Z_95·σ fill band over the historical points of any imputed series.
+	// σ is the SARIMAX in-sample residual recovered from the same series'
+	// smallest-horizon forecast interval — no separate ETL column needed,
+	// the bake's existing y_hat_lo_95 / hi_95 already encode it. Rendered
+	// BEFORE the data lines so the dotted imputed line paints on top.
+	const imputedBands =
+		view === "yield"
+			? []
+			: activeSeries.flatMap((s) =>
+					buildImputedBandTrace(
+						s,
+						recoverSigmaFromForecast(s.forecast),
+						colorOf(s),
+					),
+				);
 	// Append the CPI overlay if loaded. Going at the end keeps it as the
 	// last legend entry, below the rental/sales series — visually it
-	// reads as a "reference annotation" rather than primary data.
+	// reads as a "reference annotation" rather than primary data. Skipped
+	// on yield view since the dimensionless yield ratio doesn't share an
+	// axis with CPI's index scale.
 	const traces =
-		cpi && cpi.length > 0
-			? [...dataTraces, buildCpiTrace(cpi, theme === "dark")]
-			: dataTraces;
+		cpi && cpi.length > 0 && view !== "yield"
+			? [
+					...imputedBands,
+					...dataTraces,
+					...forecastTraces,
+					buildCpiTrace(cpi, theme === "dark"),
+				]
+			: [...imputedBands, ...dataTraces, ...forecastTraces];
 	const yTitle =
-		view === "rental" ? "Median weekly rent (AUD)" : "Median sale price (AUD)";
+		view === "rental"
+			? "Median weekly rent (AUD)"
+			: view === "sales"
+				? "Median sale price (AUD)"
+				: "Gross yield (rent × 52 / sale price)";
+	const yTickFormat = view === "yield" ? ".2%" : "$,.0f";
 
 	// Reconciled group label for the active view. The rental_sales source
 	// often collapses 2-3 SALs into one rental group (e.g. "North Melbourne-
@@ -263,14 +394,40 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 		mapping?.salName != null &&
 		groupLabel.toLowerCase() !== mapping.salName.toLowerCase();
 
+	// Model Details view: reuses the existing ModelDetailsPanel from
+	// /explore. Hosted here on the main map panel per the user's "fourth
+	// tab" ask so the underlying SARIMAX coefficients + diagnostics are
+	// visible from the headline chart, not just the analyst surface.
+	if (view === "models") {
+		return (
+			<div>
+				{forcedView === undefined && (
+					<ViewTabs
+						view={view}
+						onChange={setInternalView}
+						rentalCount={rental.length}
+						salesCount={sales.length}
+						yieldCount={yields.length}
+					/>
+				)}
+				<div data-testid="suburb-plot-models-ready" data-state="chart">
+					<ModelDetailsPanel region={region} />
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div>
-			<ViewTabs
-				view={view}
-				onChange={setView}
-				rentalCount={rental.length}
-				salesCount={sales.length}
-			/>
+			{forcedView === undefined && (
+				<ViewTabs
+					view={view}
+					onChange={setInternalView}
+					rentalCount={rental.length}
+					salesCount={sales.length}
+					yieldCount={yields.length}
+				/>
+			)}
 			{showGroupBadge && (
 				<p className="mb-1 px-1 text-[11px] text-neutral-500 dark:text-neutral-400">
 					Market area:{" "}
@@ -285,71 +442,77 @@ export default function SuburbPlot({ region }: { region: RegionSelection }) {
 				</p>
 			)}
 			{traces.length === 0 ? (
-				<div className="px-3 py-8 text-center text-xs text-neutral-500 dark:text-neutral-400">
+				<div
+					data-testid={`suburb-plot-${view}-ready`}
+					data-state="empty-view"
+					className="px-3 py-8 text-center text-xs text-neutral-500 dark:text-neutral-400"
+				>
 					No {view} data for this suburb.
 				</div>
 			) : (
-				<Plot
-					data={traces}
-					layout={{
-						autosize: true,
-						// Right margin sized for the vertical legend — needs to fit
-						// the longest trace label ("All dwellings", "House · 4 br")
-						// plus the swatch. Bottom margin shrinks now that the legend
-						// is no longer eating that band.
-						// Right margin sized to fit the secondary CPI axis (ticks +
-						// title ~50px) plus the legend (~150px) without overlap.
-						margin: { l: 56, r: 200, t: 8, b: 32 },
-						showlegend: true,
-						// Vertical legend pinned to the right of the plot area.
-						// `x: 1.02` puts it just outside the chart's right edge;
-						// `y: 1` + `yanchor: "top"` aligns it to the top so a long
-						// legend grows downward instead of centring (which would
-						// make a 2-entry "Sales" view look detached at mid-height).
-						legend: {
-							orientation: "v",
-							// Pushed further right to clear the secondary y-axis
-							// ticks + "CPI (2023-24 = 100)" title sitting against the
-							// plot area's right edge.
-							x: 1.18,
-							xanchor: "left",
-							y: 1,
-							yanchor: "top",
-							font: { color: plotlyTheme(theme).font.color },
-						},
-						xaxis: {
-							type: "date",
-							gridcolor: plotlyTheme(theme).gridcolor,
-							zerolinecolor: plotlyTheme(theme).zerolinecolor,
-						},
-						yaxis: {
-							rangemode: "tozero",
-							tickformat: "$,.0f",
-							title: { text: yTitle, standoff: 8 },
-							gridcolor: plotlyTheme(theme).gridcolor,
-							zerolinecolor: plotlyTheme(theme).zerolinecolor,
-						},
-						// Secondary axis bound to the CPI trace via `yaxis: "y2"`.
-						// `overlaying: "y"` shares the chart area; `side: "right"`
-						// puts ticks on the opposite edge. No `rangemode: tozero`
-						// here — CPI is bounded ~47 → ~102 and forcing zero would
-						// crush its visual range against the bottom of the chart.
-						yaxis2: {
-							overlaying: "y",
-							side: "right",
-							title: { text: "CPI (2023-24 = 100)", standoff: 8 },
-							showgrid: false,
-							tickfont: { color: plotlyTheme(theme).font.color },
-							titlefont: { color: plotlyTheme(theme).font.color },
-						},
-						paper_bgcolor: plotlyTheme(theme).paper_bgcolor,
-						plot_bgcolor: plotlyTheme(theme).plot_bgcolor,
-						font: { size: 11, color: plotlyTheme(theme).font.color },
-					}}
-					config={{ displaylogo: false, responsive: true }}
-					useResizeHandler
-					style={{ width: "100%", height: 280 }}
-				/>
+				<div data-testid={`suburb-plot-${view}-ready`} data-state="chart">
+					<Plot
+						data={traces}
+						layout={{
+							autosize: true,
+							// Right margin sized for the vertical legend — needs to fit
+							// the longest trace label ("All dwellings", "House · 4 br")
+							// plus the swatch. Bottom margin shrinks now that the legend
+							// is no longer eating that band.
+							// Right margin sized to fit the secondary CPI axis (ticks +
+							// title ~50px) plus the legend (~150px) without overlap.
+							margin: { l: 56, r: 200, t: 8, b: 32 },
+							showlegend: true,
+							// Vertical legend pinned to the right of the plot area.
+							// `x: 1.02` puts it just outside the chart's right edge;
+							// `y: 1` + `yanchor: "top"` aligns it to the top so a long
+							// legend grows downward instead of centring (which would
+							// make a 2-entry "Sales" view look detached at mid-height).
+							legend: {
+								orientation: "v",
+								// Pushed further right to clear the secondary y-axis
+								// ticks + "CPI (2023-24 = 100)" title sitting against the
+								// plot area's right edge.
+								x: 1.18,
+								xanchor: "left",
+								y: 1,
+								yanchor: "top",
+								font: { color: plotlyTheme(theme).font.color },
+							},
+							xaxis: {
+								type: "date",
+								gridcolor: plotlyTheme(theme).gridcolor,
+								zerolinecolor: plotlyTheme(theme).zerolinecolor,
+							},
+							yaxis: {
+								rangemode: "tozero",
+								tickformat: yTickFormat,
+								title: { text: yTitle, standoff: 8 },
+								gridcolor: plotlyTheme(theme).gridcolor,
+								zerolinecolor: plotlyTheme(theme).zerolinecolor,
+							},
+							// Secondary axis bound to the CPI trace via `yaxis: "y2"`.
+							// `overlaying: "y"` shares the chart area; `side: "right"`
+							// puts ticks on the opposite edge. No `rangemode: tozero`
+							// here — CPI is bounded ~47 → ~102 and forcing zero would
+							// crush its visual range against the bottom of the chart.
+							yaxis2: {
+								overlaying: "y",
+								side: "right",
+								title: { text: "CPI (2023-24 = 100)", standoff: 8 },
+								showgrid: false,
+								tickfont: { color: plotlyTheme(theme).font.color },
+								titlefont: { color: plotlyTheme(theme).font.color },
+							},
+							paper_bgcolor: plotlyTheme(theme).paper_bgcolor,
+							plot_bgcolor: plotlyTheme(theme).plot_bgcolor,
+							font: { size: 11, color: plotlyTheme(theme).font.color },
+						}}
+						config={{ displaylogo: false, responsive: true }}
+						useResizeHandler
+						style={{ width: "100%", height: 280 }}
+					/>
+				</div>
 			)}
 		</div>
 	);
@@ -360,11 +523,13 @@ const ViewTabs = ({
 	onChange,
 	rentalCount,
 	salesCount,
+	yieldCount,
 }: {
 	view: View;
 	onChange: (v: View) => void;
 	rentalCount: number;
 	salesCount: number;
+	yieldCount: number;
 }) => {
 	const tab = (target: View, label: string, count: number) => {
 		const active = view === target;
@@ -406,6 +571,11 @@ const ViewTabs = ({
 		>
 			{tab("rental", "Rental", rentalCount)}
 			{tab("sales", "Sales", salesCount)}
+			{tab("yield", "Yield", yieldCount)}
+			{/* Models tab is always enabled — it queries its own data and
+			    the panel handles "no model" rendering itself. Pass count=1
+			    so the tab button doesn't disable. */}
+			{tab("models", "Models", 1)}
 		</div>
 	);
 };

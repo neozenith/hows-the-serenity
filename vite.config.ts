@@ -39,6 +39,15 @@ const base = rawBase.endsWith("/") ? rawBase : `${rawBase}/`;
 export default defineConfig({
 	base,
 	plugins: [tailwindcss(), react(), data404Middleware()],
+	// `plotly.js/lib/core` (used by src/lib/plotly.ts to compose a custom
+	// Plotly bundle with sankey + treemap) references the Node-style
+	// `global` symbol at module init. Browsers don't have `global`; map it
+	// to `globalThis` so the module loads without `ReferenceError: global is
+	// not defined`. The pre-built `plotly.js-{cartesian|basic|full}-dist-min`
+	// distros polyfill this internally; the source modules don't.
+	define: {
+		global: "globalThis",
+	},
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),

@@ -1,0 +1,12 @@
+{
+  "sal": {
+    "total": 2946,
+    "observed": 760,
+    "imputed_target": 760
+  },
+  "lga": {
+    "total": 80,
+    "observed": 79,
+    "imputed_target": 79
+  }
+}

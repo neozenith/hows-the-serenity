@@ -87,6 +87,52 @@ def _load_groups(con: duckdb.DuckDBPyConnection, data_type: str) -> pd.DataFrame
     ).df()
 
 
+def _load_observed_regions(
+    con: duckdb.DuckDBPyConnection,
+) -> dict[str, list[str]]:
+    """Distinct SAL + LGA codes with at least one OBSERVED (non-imputed) row.
+
+    Rental_sales stores rental SAL codes as hyphen-joined market groups
+    (e.g. "20616-20002"), so the SAL query splits each group with
+    `string_split` and unions the individual codes — what the frontend
+    actually needs is "which SALs have ANY observed signal", regardless
+    of whether they share a rental aggregation with a neighbour.
+
+    LGA rows are always single-coded. Both queries filter
+    `source_file NOT LIKE 'imputed:%'` so the result reflects vendor data
+    only, not the four imputation classes from
+    `etl/steps/impute_coverage.py`.
+    """
+    sal_rows = con.execute(
+        """
+        SELECT DISTINCT unnest(string_split(geospatial_codes, '-')) AS code
+        FROM rental_sales
+        WHERE geospatial_type = 'suburb'
+          AND statistic = 'median'
+          AND source_file NOT LIKE 'imputed:%'
+          AND geospatial_codes IS NOT NULL
+          AND geospatial_codes <> ''
+        ORDER BY code
+        """
+    ).fetchall()
+    lga_rows = con.execute(
+        """
+        SELECT DISTINCT geospatial_codes AS code
+        FROM rental_sales
+        WHERE geospatial_type = 'lga'
+          AND statistic = 'median'
+          AND source_file NOT LIKE 'imputed:%'
+          AND geospatial_codes IS NOT NULL
+          AND geospatial_codes <> ''
+        ORDER BY code
+        """
+    ).fetchall()
+    return {
+        "sal": [r[0] for r in sal_rows],
+        "lga": [r[0] for r in lga_rows],
+    }
+
+
 def _invert_groups(groups_df: pd.DataFrame) -> dict[str, dict[str, Any]]:
     """Build sal_code → group entry. Each SAL belongs to at most one group
     *within the same data_type*, so collisions inside a single data_type
@@ -141,6 +187,7 @@ def build_suburb_mappings(
     try:
         rental_groups = _load_groups(con, "rental")
         sales_groups = _load_groups(con, "sales")
+        observed_regions = _load_observed_regions(con)
     finally:
         con.close()
     log.info(
@@ -198,4 +245,18 @@ def build_suburb_mappings(
     size_kb = output_path.stat().st_size / 1024
     log.info("Wrote suburb mappings → %s (%.1f KB)", output_path, size_kb)
     log.info("Summary: %s", json.dumps(summary, indent=2))
+
+    # Sibling manifest of region codes with at least one OBSERVED row. The
+    # frontend's region picker reads this to filter out regions that exist
+    # only via the impute step's output (none today — `Unincorporated Vic`
+    # (LGA 29399) is the one entry in lga_names.json with zero rental_sales
+    # rows of any kind, which this filter naturally excludes).
+    observed_path = output_path.parent / "observed_regions.json"
+    observed_path.write_text(json.dumps(observed_regions, separators=(",", ":")))
+    log.info(
+        "Wrote observed regions → %s (sal=%d, lga=%d)",
+        observed_path,
+        len(observed_regions["sal"]),
+        len(observed_regions["lga"]),
+    )
     return output_path

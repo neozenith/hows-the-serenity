@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { loadDataVersion } from "@/lib/data-version";
 import { ThemeProvider } from "@/lib/theme";
 import "./index.css";
-import App from "./App.tsx";
+import { Router } from "./router";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -19,7 +19,7 @@ loadDataVersion().then(() => {
 	createRoot(rootElement).render(
 		<StrictMode>
 			<ThemeProvider>
-				<App />
+				<Router />
 			</ThemeProvider>
 		</StrictMode>,
 	);

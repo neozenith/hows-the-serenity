@@ -16,6 +16,12 @@ dependencies = [
     "ruamel.yaml>=0.18",
     "duckdb>=1.1",
     "h3>=4.4.2",
+    "statsforecast>=1.7",
+    "numpy>=1.24",
+    "scikit-learn>=1.4",
+    "hdbscan>=0.8.43",
+    "evoc>=0.3.1",
+    "matplotlib>=3.10.9",
 ]
 
 [project.scripts]
@@ -72,6 +78,12 @@ module = [
     "ruamel.*",
     "duckdb",
     "duckdb.*",
+    "statsforecast",
+    "statsforecast.*",
+    "sklearn",
+    "sklearn.*",
+    "scipy",
+    "scipy.*",
 ]
 ignore_missing_imports = true
 

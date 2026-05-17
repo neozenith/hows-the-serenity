@@ -34,6 +34,7 @@ export const ControlPanel = ({
 	// Default collapsed — keeps the map area clear; user expands when needed.
 	const [collapsed, setCollapsed] = useState(true);
 	const { theme } = useOverlayTheme();
+	const toggle = () => setCollapsed((c) => !c);
 	return (
 		<aside
 			className={[
@@ -45,16 +46,24 @@ export const ControlPanel = ({
 			].join(" ")}
 		>
 			<header className="flex items-center justify-between gap-2">
-				<div className="flex items-center gap-2">
+				{/* The whole title row is the toggle target — mobile-friendly tap
+					area when HexSeriesPicker overlays the right-edge chevron. */}
+				<button
+					type="button"
+					onClick={toggle}
+					aria-expanded={!collapsed}
+					aria-label={collapsed ? "Show controls" : "Hide controls"}
+					className="-mx-1 flex flex-1 cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-neutral-100/60 dark:hover:bg-neutral-800/40"
+				>
 					<span
-						className="inline-block h-2 w-2 rounded-full"
+						className="inline-block h-2 w-2 shrink-0 rounded-full"
 						style={{ background: DOT_COLOR[status.state] }}
 						aria-hidden="true"
 					/>
-					<h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-50">
+					<h1 className="font-semibold text-base text-neutral-900 dark:text-neutral-50">
 						How's the Serenity?
 					</h1>
-				</div>
+				</button>
 				<div className="flex items-center gap-1.5">
 					{/* DOM-updated by the App's onViewStateChange — keeps textContent
 					    fresh without round-tripping through React state. */}
@@ -62,14 +71,14 @@ export const ControlPanel = ({
 						ref={zoomLabelRef}
 						role="status"
 						aria-label="Current zoom level"
-						className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400"
+						className="text-neutral-500 text-xs tabular-nums dark:text-neutral-400"
 					>
 						z {initialZoom.toFixed(1)}
 					</span>
 					<ThemeToggle />
 					<button
 						type="button"
-						onClick={() => setCollapsed((c) => !c)}
+						onClick={toggle}
 						aria-expanded={!collapsed}
 						aria-label={collapsed ? "Show controls" : "Hide controls"}
 						className="cursor-pointer rounded px-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
@@ -80,28 +89,19 @@ export const ControlPanel = ({
 			</header>
 			{!collapsed && (
 				<div className="mt-2 space-y-3">
+					{/* DB connection status only — the per-table name/row-count
+						list moved to the Debug overlay (TileMemoryOverlay) where
+						diagnostic info belongs. The user-facing control panel
+						keeps just the human-readable status line. */}
 					<section>
 						<p className="text-neutral-700 dark:text-neutral-300">
 							{status.message}
 						</p>
-						{status.state === "ready" && status.tables.length > 0 && (
-							<ul className="mt-1 space-y-0.5 text-xs text-neutral-600 dark:text-neutral-400">
-								{status.tables.map((t) => (
-									<li key={t.name}>
-										<code className="rounded bg-neutral-100 px-1 py-0.5 dark:bg-neutral-800 dark:text-neutral-200">
-											{t.name}
-										</code>
-										{" · "}
-										{t.rows.toLocaleString()} rows
-									</li>
-								))}
-							</ul>
-						)}
 					</section>
 					<hr className="border-neutral-200 dark:border-neutral-700" />
 					<section>
 						<div className="mb-1.5 flex items-center justify-between gap-2">
-							<h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+							<h2 className="font-semibold text-neutral-900 text-sm dark:text-neutral-50">
 								Layers
 							</h2>
 							<div className="flex items-center gap-1">
@@ -115,7 +115,7 @@ export const ControlPanel = ({
 									onClick={() => onSetAllVisibility(false)}
 									aria-label="Turn off every layer"
 									title="All off"
-									className="cursor-pointer rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+									className="cursor-pointer rounded px-1.5 py-0.5 text-neutral-500 text-xs hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
 								>
 									All off
 								</button>
@@ -128,34 +128,38 @@ export const ControlPanel = ({
 									onClick={onResetVisibility}
 									aria-label="Reset layer visibility to defaults"
 									title="Reset to defaults"
-									className="cursor-pointer rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+									className="cursor-pointer rounded px-1.5 py-0.5 text-neutral-500 text-xs hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
 								>
 									Reset
 								</button>
 							</div>
 						</div>
-						<ul className="space-y-1.5">
-							{LAYER_DISPLAY_DEFS.map((layer) => (
-								<li key={layer.key}>
-									<label className="flex cursor-pointer items-center gap-2 text-neutral-700 dark:text-neutral-300">
-										<input
-											type="checkbox"
-											className="h-3.5 w-3.5 cursor-pointer accent-neutral-700 dark:accent-neutral-300"
-											checked={visible[layer.key]}
-											onChange={() => onToggle(layer.key)}
-										/>
-										<span className="flex-1">
-											<span className="block text-neutral-900 dark:text-neutral-50">
+						{/* Bounded + scrollable so layers below the fold are reachable
+							on mobile and short viewports. The per-layer secondary
+							description (layer.hint) was dropped — too much vertical
+							noise; the label alone identifies each layer. */}
+						<div
+							className="max-h-[55vh] overflow-y-auto pr-1"
+							data-testid="layer-list-scroll"
+						>
+							<ul className="space-y-1.5">
+								{LAYER_DISPLAY_DEFS.map((layer) => (
+									<li key={layer.key}>
+										<label className="flex cursor-pointer items-center gap-2 text-neutral-700 dark:text-neutral-300">
+											<input
+												type="checkbox"
+												className="h-3.5 w-3.5 cursor-pointer accent-neutral-700 dark:accent-neutral-300"
+												checked={visible[layer.key]}
+												onChange={() => onToggle(layer.key)}
+											/>
+											<span className="text-neutral-900 dark:text-neutral-50">
 												{layer.label}
 											</span>
-											<span className="block text-xs text-neutral-500 dark:text-neutral-400">
-												{layer.hint}
-											</span>
-										</span>
-									</label>
-								</li>
-							))}
-						</ul>
+										</label>
+									</li>
+								))}
+							</ul>
+						</div>
 					</section>
 				</div>
 			)}

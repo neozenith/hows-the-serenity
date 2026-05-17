@@ -13,6 +13,7 @@ import type { RegionH3Cells } from "@/hooks/useRegionH3Cells";
 import type { NameLookup, RegionNames } from "@/hooks/useRegionNames";
 import { versionedUrl } from "@/lib/data-version";
 import type { RentalHexSeries } from "@/lib/rental-hex-series";
+import { schoolZoneTooltip } from "@/lib/school-zone-tooltip";
 import type { RegionSelection } from "./region";
 import { type LoadedManifest, makeGatedTileFetch } from "./tile-manifest";
 import { recordTileLoad, recordTileUnload } from "./tile-stats";
@@ -168,6 +169,32 @@ type SalSpec = {
 	dir: string;
 };
 
+// School-zone catchment polygons (DataVic 2026). One spec per level —
+// the ETL emits a separate tile dir for each (primary, secondary_year7..12,
+// standalone_juniorsec/seniorsec/singlesex) so the user can toggle each
+// independently. Polygons are picked up by deck.gl as filled regions
+// with a coloured outline; identical fill/stroke pattern across levels
+// keeps the visual grammar consistent (only label + hint differ).
+type SchoolZoneSpec = {
+	kind: "schoolZone";
+	key:
+		| "schoolPrimary"
+		| "schoolSecondaryYear7"
+		| "schoolSecondaryYear8"
+		| "schoolSecondaryYear9"
+		| "schoolSecondaryYear10"
+		| "schoolSecondaryYear11"
+		| "schoolSecondaryYear12"
+		| "schoolStandaloneJuniorsec"
+		| "schoolStandaloneSeniorsec"
+		| "schoolStandaloneSinglesex";
+	layerId: string;
+	label: string;
+	hint: string;
+	dir: string;
+	color: RGB;
+};
+
 // Debug overlay: a TileLayer that doesn't fetch anything — it just uses
 // Deck.GL's tile-coord math to draw the boundary box and "z/x/y" label
 // for every tile visible at the current zoom. Toggleable via the layer
@@ -200,6 +227,7 @@ export type LayerSpec =
 	| PtvLineSpec
 	| PtvStopsSpec
 	| SalSpec
+	| SchoolZoneSpec
 	| TileGridSpec
 	| HexagonSeriesSpec;
 
@@ -339,6 +367,99 @@ const SPECS: readonly LayerSpec[] = [
 		hint: "ABS SAL 2021",
 		dir: "suburbs",
 	},
+	// School-zone catchments (DataVic 2026). Distinct hue per level so
+	// toggling several at once stays legible. All default off — see
+	// INITIAL_VISIBILITY below.
+	{
+		kind: "schoolZone",
+		key: "schoolPrimary",
+		layerId: "school-zones-primary",
+		label: "Primary school zones",
+		hint: "DataVic 2026 · 1,270 catchments",
+		dir: "school_zones_primary",
+		color: [99, 102, 241], // indigo-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolSecondaryYear7",
+		layerId: "school-zones-secondary-year7",
+		label: "Secondary year 7 zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_secondary_year7",
+		color: [34, 197, 94], // green-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolSecondaryYear8",
+		layerId: "school-zones-secondary-year8",
+		label: "Secondary year 8 zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_secondary_year8",
+		color: [16, 185, 129], // emerald-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolSecondaryYear9",
+		layerId: "school-zones-secondary-year9",
+		label: "Secondary year 9 zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_secondary_year9",
+		color: [20, 184, 166], // teal-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolSecondaryYear10",
+		layerId: "school-zones-secondary-year10",
+		label: "Secondary year 10 zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_secondary_year10",
+		color: [6, 182, 212], // cyan-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolSecondaryYear11",
+		layerId: "school-zones-secondary-year11",
+		label: "Secondary year 11 zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_secondary_year11",
+		color: [14, 165, 233], // sky-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolSecondaryYear12",
+		layerId: "school-zones-secondary-year12",
+		label: "Secondary year 12 zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_secondary_year12",
+		color: [59, 130, 246], // blue-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolStandaloneJuniorsec",
+		layerId: "school-zones-standalone-juniorsec",
+		label: "Standalone junior-sec zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_standalone_juniorsec",
+		color: [168, 85, 247], // purple-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolStandaloneSeniorsec",
+		layerId: "school-zones-standalone-seniorsec",
+		label: "Standalone senior-sec zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_standalone_seniorsec",
+		color: [217, 70, 239], // fuchsia-500
+	},
+	{
+		kind: "schoolZone",
+		key: "schoolStandaloneSinglesex",
+		layerId: "school-zones-standalone-singlesex",
+		label: "Standalone single-sex zones",
+		hint: "DataVic 2026",
+		dir: "school_zones_standalone_singlesex",
+		color: [236, 72, 153], // pink-500
+	},
 	// Aggregation hex overlay — rendered just before the debug grid so
 	// it sits above boundary/transit context but below the developer
 	// overlay. ON by default but a kill-switch in the Layers panel:
@@ -375,6 +496,10 @@ const SPECS: readonly LayerSpec[] = [
 const DISPLAY_ORDER: readonly LayerKey[] = [
 	"lga",
 	"suburbs",
+	// rentalHex sits 3rd so the data-bearing overlay is co-located with
+	// the two clickable boundary tiers — the analyst picks "what region
+	// scope" then immediately decides whether to overlay the hex aggregate.
+	"rentalHex",
 	"iso15",
 	"iso5",
 	"trainLines",
@@ -385,7 +510,18 @@ const DISPLAY_ORDER: readonly LayerKey[] = [
 	"regionalTrainStops",
 	"commuteTrain",
 	"commuteTram",
-	"rentalHex",
+	// School-zone catchments — grouped after transit so the layer
+	// panel reads as "amenities → infrastructure → schools".
+	"schoolPrimary",
+	"schoolSecondaryYear7",
+	"schoolSecondaryYear8",
+	"schoolSecondaryYear9",
+	"schoolSecondaryYear10",
+	"schoolSecondaryYear11",
+	"schoolSecondaryYear12",
+	"schoolStandaloneJuniorsec",
+	"schoolStandaloneSeniorsec",
+	"schoolStandaloneSinglesex",
 	// Debug overlay last so it sits at the bottom of the toggle list.
 	"tileGrid",
 ];
@@ -400,11 +536,12 @@ const SPEC_BY_KEY = SPECS.reduce(
 
 const isTileLayerSpec = (
 	s: LayerSpec,
-): s is IsoSpec | PtvLineSpec | PtvStopsSpec | SalSpec =>
+): s is IsoSpec | PtvLineSpec | PtvStopsSpec | SalSpec | SchoolZoneSpec =>
 	s.kind === "iso" ||
 	s.kind === "ptvLine" ||
 	s.kind === "ptvStops" ||
-	s.kind === "sal";
+	s.kind === "sal" ||
+	s.kind === "schoolZone";
 
 export const TILE_LAYER_KEYS: readonly TileLayerKey[] = SPECS.filter(
 	isTileLayerSpec,
@@ -429,7 +566,21 @@ export const LAYER_DIRS: Record<TileLayerKey, string> = SPECS.reduce(
 // controls whether it renders by setting activeHexSeriesId. Defaulting
 // it off would require the user to flip a hidden checkbox just to make
 // their picker selection visible.
-const DEFAULT_OFF: ReadonlySet<LayerKey> = new Set<LayerKey>(["tileGrid"]);
+const DEFAULT_OFF: ReadonlySet<LayerKey> = new Set<LayerKey>([
+	"tileGrid",
+	// School zones default OFF — 10 levels would dominate a fresh map
+	// load. User opts in per-level from the Layers panel.
+	"schoolPrimary",
+	"schoolSecondaryYear7",
+	"schoolSecondaryYear8",
+	"schoolSecondaryYear9",
+	"schoolSecondaryYear10",
+	"schoolSecondaryYear11",
+	"schoolSecondaryYear12",
+	"schoolStandaloneJuniorsec",
+	"schoolStandaloneSeniorsec",
+	"schoolStandaloneSinglesex",
+]);
 export const INITIAL_VISIBILITY: LayerVisibility = SPECS.reduce((acc, s) => {
 	acc[s.key] = !DEFAULT_OFF.has(s.key);
 	return acc;
@@ -639,6 +790,37 @@ const makeIsoLayer = (
 		getDashArray: [1, 1.5],
 		dashJustified: true,
 		extensions: [new PathStyleExtension({ dash: true })],
+		fetch: makeGatedTileFetch(manifest),
+		...tileLifecycle(s.layerId),
+	});
+
+// School-zone catchment polygons. Same MVT pipeline as isochrones —
+// soft fill + stroked outline so overlapping zones (e.g. primary +
+// secondary at same geography) stay readable. pickable=false today;
+// future iteration can surface the School_Name / Year_Level properties
+// as hover tooltips.
+const makeSchoolZoneLayer = (
+	s: SchoolZoneSpec,
+	manifest: LoadedManifest,
+	visible: boolean,
+): Layer =>
+	new MVTLayer({
+		id: s.layerId,
+		data: tileUrl(s.dir, manifest.manifest.version),
+		minZoom: manifest.manifest.minZoom,
+		maxZoom: manifest.manifest.maxZoom,
+		extent: manifest.manifest.bounds,
+		visible,
+		stroked: true,
+		filled: true,
+		// Pickable so the deck.gl getTooltip callback (App's pickToTooltip)
+		// can surface "<layer label>\n<school name (entity code)>" on hover.
+		// See `schoolZoneTooltip` in src/lib/school-zone-tooltip.ts.
+		pickable: true,
+		getFillColor: [...s.color, 24] as [number, number, number, number],
+		getLineColor: [...s.color, 210] as [number, number, number, number],
+		getLineWidth: 1,
+		lineWidthMinPixels: 1,
 		fetch: makeGatedTileFetch(manifest),
 		...tileLifecycle(s.layerId),
 	});
@@ -1032,6 +1214,10 @@ export const buildLayers = ({
 					? [makeSalLayer(spec, m, visible[spec.key], onRegionClick)]
 					: [];
 			}
+			case "schoolZone": {
+				const m = manifests[spec.key];
+				return m ? [makeSchoolZoneLayer(spec, m, visible[spec.key])] : [];
+			}
 			case "tileGrid":
 				return [makeTileGridLayer(visible[spec.key])];
 			case "hexagonSeries": {
@@ -1133,5 +1319,10 @@ export const pickToTooltip = (info: {
 	if (typeof props.LGA_NAME24 === "string") {
 		return { text: `${props.LGA_NAME24}\nLGA` };
 	}
+	// School-zone catchment — match on the `level` slug or School_Name
+	// the extract step preserved. The pure helper handles every layer
+	// (primary, secondary year7-12, standalone *) consistently.
+	const schoolText = schoolZoneTooltip(props);
+	if (schoolText) return { text: schoolText };
 	return null;
 };

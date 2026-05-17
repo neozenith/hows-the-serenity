@@ -42,6 +42,7 @@ test-results/
 
 data/
 !public/data/
+!src/components/explorer/data/
 .playwright-cli/
 .*_cache/
 *.pyc
