@@ -172,8 +172,14 @@ test.describe("Suburb selection", () => {
 			// the multi-SAL rental group label is being surfaced. North Melbourne
 			// rolls up with West Melbourne for rent surveys, so the rental view
 			// must display the joined label.
-			await expect(panel).toContainText(TARGET_RENTAL_GROUP_LABEL);
-			await expect(panel).toContainText("(2 SALs)");
+			// Badge depends on suburb-mappings.json loading async + the
+			// React render of the SuburbPlot's groupLabel/groupSize hook.
+			// Bump both assertions to 30s (up from the 10s default) so the
+			// CI cold path has room to land both fetches.
+			await expect(panel).toContainText(TARGET_RENTAL_GROUP_LABEL, {
+				timeout: 30_000,
+			});
+			await expect(panel).toContainText("(2 SALs)", { timeout: 30_000 });
 
 			await page.screenshot({
 				path: `${ARTIFACT_DIR}/${SLUG_RENTAL}.png`,
