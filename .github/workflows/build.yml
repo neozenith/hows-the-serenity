@@ -18,7 +18,13 @@ jobs:
   build:
     name: Build, lint, test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 min (up from 15). The 73-commit squash that landed school-zone
+    # tiles + the explorer matrix + yield-ratio + model-details work
+    # pushed total job runtime past the old 15-min cap and the GH
+    # Actions runner cancelled the build mid-e2e (Pages deploy skipped).
+    # E2e block alone runs ~9-10 min; 25 min leaves ~10 min headroom for
+    # cold-runner fluctuation.
+    timeout-minutes: 25
     permissions:
       contents: write
 
