@@ -14,8 +14,14 @@
 
 import { expect, test } from "@playwright/test";
 
-const isRemote =
-	!process.env.PLAYWRIGHT_BASE_URL?.startsWith("http://localhost");
+// When PLAYWRIGHT_BASE_URL is unset (default `make test-e2e` flow), the
+// playwright config falls back to localhost; we mirror that default here
+// so the `!startsWith("http://localhost")` check actually evaluates a
+// string rather than `undefined`. Without the `??`, optional-chained
+// undefined coerced to !undefined === true → spec ran against localhost
+// and failed.
+const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5174";
+const isRemote = !baseUrl.startsWith("http://localhost");
 
 test.describe("Post-deploy smoke", () => {
 	// Whole spec is skipped unless PLAYWRIGHT_BASE_URL points at a remote
