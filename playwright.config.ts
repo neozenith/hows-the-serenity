@@ -10,6 +10,11 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 5174);
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
+// When pointed at a remote URL (e.g. the live Pages deploy for
+// post-deploy verification), skip the dev-server bootstrap — there's no
+// local server to start and `webServer` would block on a localhost
+// port that no one's serving.
+const IS_REMOTE_TARGET = !BASE_URL.startsWith("http://localhost");
 
 export default defineConfig({
 	testDir: "./e2e",
@@ -40,10 +45,12 @@ export default defineConfig({
 			use: { ...devices["Desktop Chrome"] },
 		},
 	],
-	webServer: {
-		command: `bun run dev -- --port ${PORT} --strictPort`,
-		url: BASE_URL,
-		reuseExistingServer: !process.env.CI,
-		timeout: 120_000,
-	},
+	webServer: IS_REMOTE_TARGET
+		? undefined
+		: {
+				command: `bun run dev -- --port ${PORT} --strictPort`,
+				url: BASE_URL,
+				reuseExistingServer: !process.env.CI,
+				timeout: 120_000,
+			},
 });

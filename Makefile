@@ -151,6 +151,14 @@ test-e2e-ui: install-ts ## Playwright in interactive UI mode
 test-e2e-explore: install-ts ## Playwright e2e against the Explorer SPA (flag on)
 	VITE_ENABLE_EXPLORE=true bun run test:e2e -- e2e/explorer.spec.ts
 
+# Post-deploy verification — runs e2e/prod-smoke.spec.ts against the
+# live Pages deploy (or any URL via PLAYWRIGHT_BASE_URL env override).
+# playwright.config.ts skips its webServer bootstrap when the base URL
+# isn't http://localhost, so no dev server is started.
+PROD_URL ?= https://joshpeak.net/hows-the-serenity/
+test-e2e-prod: install-ts ## Playwright smoke against the live deploy ($(PROD_URL))
+	PLAYWRIGHT_BASE_URL=$(PROD_URL) bun run test:e2e -- e2e/prod-smoke.spec.ts
+
 e2e-report: install-ts ## Render e2e-screenshots/ into one review markdown (REPORT.md)
 	bun run scripts/render-e2e-report.ts
 

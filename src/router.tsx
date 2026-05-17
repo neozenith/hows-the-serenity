@@ -27,8 +27,18 @@ const ExplorerTree = EXPLORER_ENABLED
 		)
 	: null;
 
+// `basename` must match Vite's `base` so `<Route path="/">` actually
+// matches when the site is served from a sub-path (e.g. GitHub Pages at
+// `/hows-the-serenity/`). Without this, BrowserRouter receives the
+// full pathname `/hows-the-serenity/` and no route matches — React
+// mounts but renders nothing, no error fires, and the page stays blank.
+// Vite injects import.meta.env.BASE_URL with the trailing slash; strip
+// it so the basename is `/hows-the-serenity` (BrowserRouter expects
+// no trailing slash).
+const BASENAME = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 export const Router = () => (
-	<BrowserRouter>
+	<BrowserRouter basename={BASENAME}>
 		<Routes>
 			<Route path="/" element={<App />} />
 			{ExplorerTree && (
