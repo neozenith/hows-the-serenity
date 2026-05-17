@@ -18,6 +18,17 @@ const isRemote =
 	!process.env.PLAYWRIGHT_BASE_URL?.startsWith("http://localhost");
 
 test.describe("Post-deploy smoke", () => {
+	// Whole spec is skipped unless PLAYWRIGHT_BASE_URL points at a remote
+	// target. The default `make test-e2e` runs against localhost — these
+	// assertions are tuned for the live deploy's cold path and don't make
+	// sense (or just consistently fail) against the dev server. Invoke
+	// explicitly via `make test-e2e-prod` to actually exercise this spec.
+	test.skip(
+		!isRemote,
+		"Set PLAYWRIGHT_BASE_URL to a remote URL (or use `make test-e2e-prod`)",
+	);
+
+
 	test("page loads, React mounts, root has content", async ({ page }) => {
 		const consoleErrors: string[] = [];
 		const pageErrors: string[] = [];
