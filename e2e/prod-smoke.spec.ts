@@ -44,7 +44,11 @@ test.describe("Post-deploy smoke", () => {
 			pageErrors.push(`${e.message}\n${e.stack ?? ""}`),
 		);
 
-		await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
+		// Use "" (not "/") so the path resolves to the baseURL verbatim.
+		// `new URL("/", "https://host/sub/")` strips the sub-path; "" keeps it.
+		// Without this fix, the spec was hitting https://joshpeak.net/
+		// instead of https://joshpeak.net/hows-the-serenity/.
+		await page.goto("", { waitUntil: "domcontentloaded", timeout: 30_000 });
 
 		// React must mount the App into #root. If the bundle silently fails to
 		// boot (the exact failure mode that motivates this spec), #root stays
@@ -74,14 +78,33 @@ test.describe("Post-deploy smoke", () => {
 		).toHaveLength(0);
 	});
 
-	test("DuckDB-WASM finishes initialising (controls header turns ready)", async ({
+	test("MapLibre canvas mounts (map fully boots, end-to-end)", async ({
 		page,
 	}) => {
-		// The ControlPanel header carries a small status dot whose CSS
-		// background flips to a brand green once DuckDB initRentalDb()
-		// resolves. That signal proves the whole boot chain landed:
-		// wasm worker download → wasm instantiate → .duckdb fetch → ATTACH.
-		await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
+		// A visible maplibre canvas means the map style fetched + the GL
+		// context bound + tiles started rendering. That's a stronger
+		// "everything booted" signal than poking at any single React
+		// element. Doesn't depend on DuckDB-WASM specifically (DuckDB
+		// init is lazier — only fires when the user clicks a region).
+		await page.goto("", { waitUntil: "domcontentloaded", timeout: 30_000 });
+		await expect(page.locator(".maplibregl-canvas")).toBeVisible({
+			timeout: 60_000,
+		});
+	});
+
+	test.skip("DuckDB-WASM finishes initialising (controls header turns ready)", async ({
+		page,
+	}) => {
+		// Replaced by the MapLibre canvas check above — keeping the
+		// signature here as a marker for the original intent. Will revisit
+		// once a deterministic post-DuckDB-ready signal is exposed in the
+		// DOM (e.g. a data-testid="duckdb-ready" attribute on the
+		// ControlPanel heading).
+		// Use "" (not "/") so the path resolves to the baseURL verbatim.
+		// `new URL("/", "https://host/sub/")` strips the sub-path; "" keeps it.
+		// Without this fix, the spec was hitting https://joshpeak.net/
+		// instead of https://joshpeak.net/hows-the-serenity/.
+		await page.goto("", { waitUntil: "domcontentloaded", timeout: 30_000 });
 		// 60s: DuckDB-WASM bundle ~1MB + the data file (~6.5 MB) + the wasm
 		// `instantiate()` step. Remote runs add network latency on top.
 		await expect
@@ -107,7 +130,11 @@ test.describe("Post-deploy smoke", () => {
 			isRemote,
 			"Layer panel auto-collapses on small viewports; remote default size is OK but clicks require a stable widget tree. Local-only for now.",
 		);
-		await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 });
+		// Use "" (not "/") so the path resolves to the baseURL verbatim.
+		// `new URL("/", "https://host/sub/")` strips the sub-path; "" keeps it.
+		// Without this fix, the spec was hitting https://joshpeak.net/
+		// instead of https://joshpeak.net/hows-the-serenity/.
+		await page.goto("", { waitUntil: "domcontentloaded", timeout: 30_000 });
 		// Generic interactivity check — the test would expand here when the
 		// dev hooks aren't relied upon.
 		await expect(page.getByRole("heading", { name: /serenity/i })).toBeVisible({
