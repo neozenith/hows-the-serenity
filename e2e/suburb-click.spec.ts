@@ -141,7 +141,12 @@ test.describe("Suburb selection", () => {
 			// setSelection fires, the main thread is busy with MVT tile fetches
 			// and DuckDB initialisation, so the first React render lands ~10-15s
 			// later. 30s leaves margin without masking a true hang.
-			const panel = page.locator('aside:has-text("SAL")').first();
+			// Pinned to an aside containing an h2 with "SAL" — only the
+			// SuburbPlotPanel matches. The map's ControlPanel is also an
+			// aside and its layer-hint text "ABS SAL 2021" was matching the
+			// looser `aside:has-text("SAL")` selector on CI, hijacking the
+			// later .main-svg + badge assertions against the wrong element.
+			const panel = page.locator('aside:has(h2:has-text("SAL"))').first();
 			await panel.waitFor({ state: "visible", timeout: 30_000 });
 
 			// Wait for Plotly's chart SVG to actually be in the DOM. `.main-svg`

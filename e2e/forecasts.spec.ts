@@ -69,7 +69,9 @@ test.describe("Forecast traces on the SuburbPlot", () => {
 		);
 
 		// Plot panel + chart SVG must render before we can inspect traces.
-		const panel = page.locator('aside:has-text("SAL")').first();
+		// Pinned to an aside containing an h2 — only SuburbPlotPanel matches.
+		// See suburb-click.spec.ts comment for the ControlPanel hijack story.
+		const panel = page.locator('aside:has(h2:has-text("SAL"))').first();
 		await panel.waitFor({ state: "visible", timeout: 30_000 });
 		await panel.locator(".main-svg").first().waitFor({
 			state: "visible",
