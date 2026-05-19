@@ -279,6 +279,16 @@ const main = async (): Promise<void> => {
 				: ""
 		}_`,
 		"",
+		"---",
+		"",
+		"<details>",
+		"<summary><b>Table of Contents</b></summary>",
+		"<!--TOC-->",
+		"<!--TOC-->",
+		"</details>",
+		"",
+		"---",
+		"",
 	];
 
 	const rendered = await Promise.all(

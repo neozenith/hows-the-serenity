@@ -1,4 +1,8 @@
 import { lazy, Suspense } from "react";
+import {
+	SourceFilterChips,
+	useSourceFilter,
+} from "@/components/SourceFilterChips";
 import type { RegionSelection } from "@/lib/region";
 import type { RegionKind } from "@/lib/rental-sales-query";
 import { overlayThemeClass, useOverlayTheme } from "@/lib/theme";
@@ -15,6 +19,11 @@ const KIND_BADGE: Record<RegionKind, string> = {
 	lga: "LGA",
 };
 
+// The floating bottom-of-map panel that hosts the rental/sales/yield/models
+// SuburbPlot for whichever polygon the user clicked. A compact source-filter
+// chip group sits in the header next to the close button — same URL state
+// (`?sources=…`) as the /explore RegionDualPlot, so a filter picked here
+// persists into the analyst surface and vice versa.
 export const SuburbPlotPanel = ({
 	selection,
 	onClose,
@@ -23,6 +32,7 @@ export const SuburbPlotPanel = ({
 	onClose: () => void;
 }) => {
 	const { theme } = useOverlayTheme();
+	const [filter, setFilter] = useSourceFilter();
 	if (!selection) return null;
 	return (
 		<aside
@@ -33,13 +43,22 @@ export const SuburbPlotPanel = ({
 				overlayThemeClass(theme),
 			].join(" ")}
 		>
-			<header className="mb-1 flex items-center justify-between gap-2">
+			<header className="mb-1 flex flex-wrap items-center justify-between gap-2">
 				<h2 className="font-semibold text-neutral-900 dark:text-neutral-50">
 					{selection.name}
 					<span className="ml-1.5 font-normal text-neutral-500 text-xs dark:text-neutral-400">
 						{KIND_BADGE[selection.kind]} {selection.code}
 					</span>
 				</h2>
+				{/* Compact chips share the header row when the panel is wide enough,
+				    wrap to a new line on narrow viewports thanks to flex-wrap. */}
+				<SourceFilterChips
+					filter={filter}
+					onChange={setFilter}
+					size="sm"
+					testIdPrefix="map-source-filter"
+					className="ml-auto mr-1"
+				/>
 				<button
 					type="button"
 					onClick={onClose}
@@ -57,7 +76,7 @@ export const SuburbPlotPanel = ({
 						</div>
 					}
 				>
-					<SuburbPlot region={selection} />
+					<SuburbPlot region={selection} sourceFilter={filter} />
 				</Suspense>
 			</ErrorBoundary>
 		</aside>

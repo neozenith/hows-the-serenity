@@ -10,22 +10,39 @@
 // vertical scrollable list, with the current selection highlighted, so
 // browsing siblings is one glance away.
 //
-// The full options array comes from RegionExplorer (already sorted by
-// name and pre-filtered to the observed-data set), so this component
-// stays pure: search filter, render, click → navigate. No data fetching
-// or routing logic here.
+// The full options array comes from RegionExplorer (already sorted and
+// pre-filtered to the observed-data set), so this component stays
+// presentation-only: search filter, sort-toggle dispatch, render,
+// click → navigate.
+//
+// Sort mode (alpha | geo) is owned by RegionExplorer and reflected in
+// the `?sort=` URL param. The picker only renders the toggle and
+// forwards clicks via `onSortModeChange`. When sort=geo each row gets a
+// "X km" badge built from the RankedOption.distanceKm provided by the
+// parent — the picker never recomputes distances itself.
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import {
+	formatDistanceKm,
+	type RankedOption,
+	type SortMode,
+} from "@/lib/region-distance";
 import type { RegionKind } from "@/lib/rental-sales-query";
 
 export type RegionPickerOption = { code: string; name: string };
 
 type Props = {
 	kind: RegionKind;
-	options: ReadonlyArray<RegionPickerOption>;
+	options: ReadonlyArray<RankedOption<RegionPickerOption>>;
 	selectedCode: string;
+	sortMode: SortMode;
+	onSortModeChange: (next: SortMode) => void;
+	// True once the centroid file has loaded for this kind. Until then
+	// geo mode silently behaves as alpha (sortOptions falls back), so we
+	// disable the geo button to avoid pretending the click did something.
+	geoSortAvailable: boolean;
 };
 
 const STORAGE_KEY = "hts:region-picker-collapsed";
@@ -39,7 +56,85 @@ const readCollapsed = (): boolean => {
 	}
 };
 
-export const RegionPicker = ({ kind, options, selectedCode }: Props) => {
+// Tiny segmented control for the sort toggle. Lives inline in the
+// picker header (only when expanded). Default mode (geo) is the active
+// state when the URL has no `?sort=` param.
+const SortToggle = ({
+	mode,
+	onChange,
+	geoSortAvailable,
+}: {
+	mode: SortMode;
+	onChange: (next: SortMode) => void;
+	geoSortAvailable: boolean;
+}) => {
+	const Button = ({
+		target,
+		label,
+		hint,
+		disabled = false,
+	}: {
+		target: SortMode;
+		label: string;
+		hint: string;
+		disabled?: boolean;
+	}) => {
+		const active = mode === target;
+		return (
+			// biome-ignore lint/a11y/useSemanticElements: chip-style segmented control — buttons live inside role="radiogroup", the standard accessible pattern for visually stylable mutually-exclusive toggles. Switching to <input type="radio"> would defeat the chip styling without changing screen-reader behaviour.
+			<button
+				type="button"
+				role="radio"
+				aria-checked={active}
+				aria-label={hint}
+				title={hint}
+				data-testid={`region-picker-sort-${target}`}
+				data-active={active ? "true" : "false"}
+				disabled={disabled}
+				onClick={() => !disabled && !active && onChange(target)}
+				className={[
+					"rounded px-1.5 py-0.5 text-[11px] transition-colors",
+					active
+						? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+						: disabled
+							? "cursor-not-allowed text-neutral-400 dark:text-neutral-600"
+							: "cursor-pointer text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800",
+				].join(" ")}
+			>
+				{label}
+			</button>
+		);
+	};
+	return (
+		<div
+			role="radiogroup"
+			aria-label="Region picker sort order"
+			className="flex items-center gap-1"
+			data-testid="region-picker-sort"
+		>
+			<Button target="alpha" label="A–Z" hint="Sort alphabetically" />
+			<Button
+				target="geo"
+				label="Geo"
+				hint={
+					geoSortAvailable
+						? "Sort by distance from Melbourne CBD"
+						: "Sort by distance (loading centroids…)"
+				}
+				disabled={!geoSortAvailable}
+			/>
+		</div>
+	);
+};
+
+export const RegionPicker = ({
+	kind,
+	options,
+	selectedCode,
+	sortMode,
+	onSortModeChange,
+	geoSortAvailable,
+}: Props) => {
 	const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
 	const [search, setSearch] = useState<string>("");
 
@@ -68,17 +163,25 @@ export const RegionPicker = ({ kind, options, selectedCode }: Props) => {
 		<aside
 			data-testid="region-picker"
 			data-collapsed={collapsed ? "true" : "false"}
+			data-sort-mode={sortMode}
 			className={[
 				"flex shrink-0 flex-col gap-2 border-neutral-200 border-r bg-white p-2 transition-[width] duration-150",
 				"dark:border-neutral-800 dark:bg-neutral-950",
 				collapsed ? "w-12" : "w-72",
 			].join(" ")}
 		>
-			<div className="flex items-center justify-between">
+			<div className="flex items-center justify-between gap-2">
 				{!collapsed && (
 					<h2 className="px-1 font-medium text-neutral-500 text-xs uppercase tracking-wide dark:text-neutral-400">
 						{label}s ({options.length.toLocaleString()})
 					</h2>
+				)}
+				{!collapsed && (
+					<SortToggle
+						mode={sortMode}
+						onChange={onSortModeChange}
+						geoSortAvailable={geoSortAvailable}
+					/>
 				)}
 				<button
 					type="button"
@@ -124,12 +227,24 @@ export const RegionPicker = ({ kind, options, selectedCode }: Props) => {
 						) : (
 							filtered.map((o) => {
 								const active = o.code === selectedCode;
+								// Distance badge appears only in geo mode AND only when
+								// we actually have a distance (a region with a missing
+								// centroid lands at Infinity and prints "").
+								const distanceLabel =
+									sortMode === "geo" && Number.isFinite(o.distanceKm)
+										? formatDistanceKm(o.distanceKm)
+										: "";
 								return (
 									<li key={o.code}>
 										<Link
 											to={`${routePrefix}${o.code}`}
 											data-testid="region-picker-item"
 											data-code={o.code}
+											data-distance-km={
+												Number.isFinite(o.distanceKm)
+													? o.distanceKm.toFixed(3)
+													: ""
+											}
 											aria-current={active ? "page" : undefined}
 											className={[
 												"flex items-center justify-between gap-2 px-2 py-1 text-sm",
@@ -146,7 +261,9 @@ export const RegionPicker = ({ kind, options, selectedCode }: Props) => {
 														: "text-neutral-400 text-xs dark:text-neutral-600"
 												}
 											>
-												{o.code}
+												{distanceLabel
+													? `${distanceLabel} · ${o.code}`
+													: o.code}
 											</span>
 										</Link>
 									</li>

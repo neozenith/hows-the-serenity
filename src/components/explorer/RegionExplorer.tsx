@@ -14,9 +14,13 @@
 // least one OBSERVED (non-imputed) row in rental_sales appear; the
 // route itself is unrestricted so a typed-in URL to a dataless region
 // still renders the not-found placeholder.
+//
+// Picker sort order lives in `?sort=alpha|geo` (default geo). Geo mode
+// ranks options by great-circle distance to Melbourne's CBD reference
+// region (SAL 21640 / LGA 24600) — see src/lib/region-distance.ts.
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 
 import { ModelDetailsPanel } from "@/components/explorer/ModelDetailsPanel";
 import { RegionDualPlot } from "@/components/explorer/RegionDualPlot";
@@ -24,8 +28,16 @@ import {
 	RegionPicker,
 	type RegionPickerOption,
 } from "@/components/explorer/RegionPicker";
+import { useCentroids } from "@/hooks/useCentroids";
 import { versionedUrl } from "@/lib/data-version";
 import type { RegionSelection } from "@/lib/region";
+import {
+	parseSortMode,
+	referenceCodeFor,
+	SORT_MODE_PARAM,
+	type SortMode,
+	sortOptions,
+} from "@/lib/region-distance";
 import type { RegionKind } from "@/lib/rental-sales-query";
 import {
 	getSuburbMappings,
@@ -136,27 +148,51 @@ const useObservedRegions = (): ObservedRegions | null => {
 
 export const RegionExplorer = ({ kind }: { kind: RegionKind }) => {
 	const { id = "" } = useParams<{ id: string }>();
+	const [searchParams, setSearchParams] = useSearchParams();
 
 	const mappings = useSuburbMappingsState();
 	const lgaNames = useLgaNames();
 	const observed = useObservedRegions();
+	const centroids = useCentroids(kind);
 
-	const options = useMemo<RegionPickerOption[]>(() => {
+	const sortMode: SortMode = parseSortMode(searchParams.get(SORT_MODE_PARAM));
+	const setSortMode = (next: SortMode) => {
+		const sp = new URLSearchParams(searchParams);
+		// "geo" is the default — omit from the URL so a clean /explore link
+		// stays clean. Only "alpha" round-trips through the param.
+		if (next === "geo") {
+			sp.delete(SORT_MODE_PARAM);
+		} else {
+			sp.set(SORT_MODE_PARAM, next);
+		}
+		setSearchParams(sp, { replace: true });
+	};
+
+	// Step 1: build the kind-correct base option list — every observed
+	// SAL/LGA with a known (code, name). Pre-sort isn't necessary because
+	// sortOptions below re-ranks anyway.
+	const baseOptions = useMemo<RegionPickerOption[]>(() => {
 		if (!observed) return [];
 		if (kind === "suburb" && mappings) {
 			return Object.entries(mappings.salCodes)
 				.filter(([code]) => observed.sal.has(code))
-				.map(([code, v]) => ({ code, name: v.salName }))
-				.sort((a, b) => a.name.localeCompare(b.name));
+				.map(([code, v]) => ({ code, name: v.salName }));
 		}
 		if (kind === "lga" && lgaNames) {
 			return Object.entries(lgaNames)
 				.filter(([code]) => observed.lga.has(code))
-				.map(([code, name]) => ({ code, name }))
-				.sort((a, b) => a.name.localeCompare(b.name));
+				.map(([code, name]) => ({ code, name }));
 		}
 		return [];
 	}, [kind, mappings, lgaNames, observed]);
+
+	// Step 2: rank via the sort mode. RankedOption carries distanceKm +
+	// isReference, which the picker uses to render a "0 km" / "3 km"
+	// badge next to each row when geo mode is live.
+	const options = useMemo(
+		() => sortOptions(baseOptions, sortMode, centroids, referenceCodeFor(kind)),
+		[baseOptions, sortMode, centroids, kind],
+	);
 
 	const selection = useMemo<RegionSelection | null>(() => {
 		const opt = options.find((o) => o.code === id);
@@ -167,7 +203,14 @@ export const RegionExplorer = ({ kind }: { kind: RegionKind }) => {
 
 	return (
 		<div className="flex h-full">
-			<RegionPicker kind={kind} options={options} selectedCode={id} />
+			<RegionPicker
+				kind={kind}
+				options={options}
+				selectedCode={id}
+				sortMode={sortMode}
+				onSortModeChange={setSortMode}
+				geoSortAvailable={centroids !== null}
+			/>
 			<div
 				className="min-w-0 flex-1 overflow-y-auto p-3"
 				data-testid="region-explorer"

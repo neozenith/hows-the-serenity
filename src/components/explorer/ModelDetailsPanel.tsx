@@ -2,9 +2,10 @@
 // model for the region currently in view. Pulls from the `forecast_models`
 // sidecar table (built alongside `forecasts` in the bake) and shows the
 // SARIMAX orders, σ²/AICc/N, exog, and lineage (observed vs which
-// imputation class fed the input). Wrapped in a <details> so it
-// doesn't dominate the page; the analyst opens it when they want the
-// "why is this trace shaped this way" detail.
+// imputation class fed the input). Always expanded — the analyst expects
+// to see the model coefficients immediately when they land on the page,
+// and the row count is small enough that hiding the table behind a
+// <details> twirly was lossy effort.
 //
 // Lineage column ("Source") collapses two facts into one cell:
 //   - was the input data observed (vendor) or imputed (Class A/B/C/D)?
@@ -118,16 +119,16 @@ export const ModelDetailsPanel = ({ region }: { region: RegionSelection }) => {
 	}
 
 	return (
-		<details
+		<section
 			className="mt-4 rounded-md border border-neutral-200 bg-white p-2 dark:border-neutral-800 dark:bg-neutral-900"
 			data-testid="model-details-panel"
 		>
-			<summary className="cursor-pointer font-medium text-neutral-700 text-sm dark:text-neutral-200">
+			<h3 className="font-medium text-neutral-700 text-sm dark:text-neutral-200">
 				Model details
 				<span className="ml-2 font-normal text-neutral-500 text-xs dark:text-neutral-400">
 					{models.length} fitted series
 				</span>
-			</summary>
+			</h3>
 			<div className="mt-2 overflow-x-auto">
 				<table className="w-full text-xs">
 					<thead className="text-neutral-600 dark:text-neutral-400">
@@ -178,6 +179,6 @@ export const ModelDetailsPanel = ({ region }: { region: RegionSelection }) => {
 					</tbody>
 				</table>
 			</div>
-		</details>
+		</section>
 	);
 };

@@ -271,8 +271,8 @@ test.describe("Explorer · /explore · sanity", () => {
 		await page.goto(`/explore/lga/${DEFAULT_LGA_ID}`);
 		const panel = page.locator('[data-testid="model-details-panel"]');
 		await expect(panel).toBeVisible({ timeout: 30_000 });
-		// <details> is collapsed by default — expand it before asserting rows.
-		await panel.locator("summary").click();
+		// Panel is always expanded — rows render as soon as the
+		// forecast_models query resolves.
 		await expect(
 			page.locator('[data-testid="model-details-row"]').first(),
 		).toBeVisible({ timeout: 10_000 });
@@ -513,6 +513,92 @@ test.describe("Explorer · /explore · sanity", () => {
 		await expect(
 			page.locator('[data-testid="explorer-sidenav"]'),
 		).toHaveAttribute("data-collapsed", "true");
+	});
+
+	test("source-filter toolbar exposes 4 modes, defaults to 'all', and round-trips via ?sources=", async ({
+		page,
+	}) => {
+		await page.goto(`/explore/lga/${DEFAULT_LGA_ID}`);
+		const toolbar = page.locator('[data-testid="source-filter-toolbar"]');
+		await expect(toolbar).toBeVisible({ timeout: 30_000 });
+		// Default mode = "all" (no ?sources= in the URL).
+		await expect(
+			page.locator('[data-testid="source-filter-all"]'),
+		).toHaveAttribute("data-active", "true");
+		// Switching modes pushes the param into the URL.
+		await page.locator('[data-testid="source-filter-observed"]').click();
+		await expect(page).toHaveURL(/sources=observed/, { timeout: 5_000 });
+		await expect(
+			page.locator('[data-testid="source-filter-observed"]'),
+		).toHaveAttribute("data-active", "true");
+		// Both rental and sales panels still reach a terminal render state
+		// after the filter narrows the data (catches the silent-CPI-only
+		// regression where dropping all data traces left a stranded chart).
+		await expect(
+			page.locator('[data-testid="suburb-plot-rental-ready"]'),
+		).toBeVisible({ timeout: 30_000 });
+		await expect(
+			page.locator('[data-testid="suburb-plot-sales-ready"]'),
+		).toBeVisible({ timeout: 30_000 });
+		// Returning to "all" clears the param so the canonical URL stays clean.
+		await page.locator('[data-testid="source-filter-all"]').click();
+		await expect(page).not.toHaveURL(/sources=/, { timeout: 5_000 });
+	});
+
+	test("?sources=forecast deep link is honoured on first paint", async ({
+		page,
+	}) => {
+		// Pasted URL form — the toolbar should mount in the deep-linked mode
+		// rather than the default. This is what enables iterating filter
+		// permutations via the slug-taxonomy matrix.
+		await page.goto(`/explore/lga/${DEFAULT_LGA_ID}?sources=forecast`);
+		await expect(
+			page.locator('[data-testid="source-filter-forecast"]'),
+		).toHaveAttribute("data-active", "true", { timeout: 30_000 });
+	});
+
+	test("region picker geo sort: Melbourne first, distance badges visible", async ({
+		page,
+	}) => {
+		// Default sort is geographic (no ?sort= in the URL). The Melbourne
+		// LGA (24600) is the reference point and must occupy the first row
+		// with a "0 km" distance badge.
+		await page.goto(`/explore/lga/${DEFAULT_LGA_ID}`);
+		const picker = page.locator('[data-testid="region-picker"]');
+		await expect(picker).toBeVisible({ timeout: 30_000 });
+		await expect(picker).toHaveAttribute("data-sort-mode", "geo", {
+			timeout: 30_000,
+		});
+		const items = page.locator('[data-testid="region-picker-item"]');
+		const firstCode = await items.first().getAttribute("data-code");
+		expect(firstCode).toBe(DEFAULT_LGA_ID);
+		// First row reports 0 km (well under the 0.5km bucket).
+		const firstDistance = await items.first().getAttribute("data-distance-km");
+		expect(Number(firstDistance)).toBeLessThan(0.5);
+	});
+
+	test("region picker sort toggle: switching to alpha re-orders + sets ?sort=alpha", async ({
+		page,
+	}) => {
+		await page.goto(`/explore/lga/${DEFAULT_LGA_ID}`);
+		await expect(page.locator('[data-testid="region-picker"]')).toBeVisible({
+			timeout: 30_000,
+		});
+		await page.locator('[data-testid="region-picker-sort-alpha"]').click();
+		await expect(page).toHaveURL(/sort=alpha/, { timeout: 5_000 });
+		await expect(page.locator('[data-testid="region-picker"]')).toHaveAttribute(
+			"data-sort-mode",
+			"alpha",
+		);
+		// First row in alpha mode is "Alpine" (LGA 20110) — the first entry
+		// in lga_names.json alphabetically among observed regions.
+		const firstName = await page
+			.locator('[data-testid="region-picker-item"]')
+			.first()
+			.locator("span")
+			.first()
+			.innerText();
+		expect(firstName.trim().toLowerCase().startsWith("a")).toBe(true);
 	});
 });
 
