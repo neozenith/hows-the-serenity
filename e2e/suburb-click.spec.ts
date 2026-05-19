@@ -253,6 +253,30 @@ test.describe("Suburb selection", () => {
 				fullPage: true,
 			});
 
+			// --- Source filter chips on the map panel ----------------------
+			// The compact SourceFilterChips component must be mounted in the
+			// header alongside the close button and drive the same `?sources=`
+			// URL param the /explore RegionDualPlot uses. We can't fully
+			// validate the filter's effect on the chart here (the trace count
+			// changes are covered by the /explore matrix), but the contract
+			// to assert at this surface is: chips render, default is "all",
+			// clicking another chip writes the URL, returning to "all"
+			// clears the URL.
+			const filterToolbar = panel.locator(
+				'[data-testid="map-source-filter-toolbar"]',
+			);
+			await expect(filterToolbar).toBeVisible();
+			await expect(
+				panel.locator('[data-testid="map-source-filter-all"]'),
+			).toHaveAttribute("data-active", "true");
+			await panel.locator('[data-testid="map-source-filter-observed"]').click();
+			await expect(page).toHaveURL(/sources=observed/, { timeout: 5_000 });
+			await expect(
+				panel.locator('[data-testid="map-source-filter-observed"]'),
+			).toHaveAttribute("data-active", "true");
+			await panel.locator('[data-testid="map-source-filter-all"]').click();
+			await expect(page).not.toHaveURL(/sources=/, { timeout: 5_000 });
+
 			// Fail loudly if the ErrorBoundary fallback was rendered.
 			const errorBanner = await page.locator('text="Render error:"').count();
 			expect(errorBanner, "ErrorBoundary fallback rendered").toBe(0);

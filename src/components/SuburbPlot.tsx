@@ -10,6 +10,14 @@ import {
 	queryRegionTimeSeries,
 	type SuburbTimeSeries,
 } from "@/lib/rental-sales-query";
+import {
+	DEFAULT_SOURCE_FILTER,
+	filterSeries,
+	filterYieldSeries,
+	type SourceFilter,
+	shouldShowForecast,
+	shouldShowImputedBand,
+} from "@/lib/source-filter";
 import { lookupSuburb } from "@/lib/suburb-mappings";
 import {
 	buildForecastTrace,
@@ -150,14 +158,21 @@ const plotlyTheme = (theme: OverlayTheme) => {
 // `view` pins the chart to one side and hides the rental/sales tab UI; the
 // map route omits it (tabbed default) and the /explore RegionDualPlot
 // stacks two pinned mounts (one rental, one sales) on the same page.
+//
+// `sourceFilter` scopes which provenance classes contribute to the chart
+// (default "all" preserves pre-toggle behaviour, so the map-side mount
+// keeps rendering observed + imputed + forecast without changes). The
+// /explore RegionDualPlot drives this from its `?sources=` URL state.
 export default function SuburbPlot({
 	region,
 	intervals = DEFAULT_INTERVALS,
 	view: forcedView,
+	sourceFilter = DEFAULT_SOURCE_FILTER,
 }: {
 	region: RegionSelection;
 	intervals?: ReadonlyArray<80 | 95>;
 	view?: View;
+	sourceFilter?: SourceFilter;
 }) {
 	const [series, setSeries] = useState<SuburbTimeSeries[] | null>(null);
 	const [cpi, setCpi] = useState<CpiPoint[] | null>(null);
@@ -302,13 +317,20 @@ export default function SuburbPlot({
 		);
 	}
 
-	const activeSeries =
+	const fullActiveSeries =
 		view === "rental" ? rental : view === "sales" ? sales : [];
+	// Apply the analyst's source-filter selection. Filtering happens AFTER
+	// the full slice set drives the colour map below, so toggling between
+	// modes never reshuffles colours mid-session.
+	const activeSeries = filterSeries(fullActiveSeries, sourceFilter);
+	const visibleYields = filterYieldSeries(yields, sourceFilter);
 	// Shared palette index for this view. A series's observed line, its
 	// imputed-σ band, and its forecast continuation all read the same
-	// colour out of this map. For yield view: index off the yield series'
-	// own (dwelling, bedrooms) so colours stay stable between rental/
-	// sales/yield tabs for the same slice.
+	// colour out of this map. Built from the UNFILTERED slice set so the
+	// palette index of each slice is stable across source-filter toggles
+	// (otherwise dropping imputed shifts every remaining trace's colour).
+	// For yield view: index off the yield series' own (dwelling, bedrooms)
+	// so colours stay stable between rental/sales/yield tabs.
 	const colorMap =
 		view === "yield"
 			? buildColorMap(
@@ -322,7 +344,7 @@ export default function SuburbPlot({
 						}),
 					),
 				)
-			: buildColorMap(activeSeries);
+			: buildColorMap(fullActiveSeries);
 	const colorOf = (s: SuburbTimeSeries): string | undefined =>
 		colorMap.get(seriesColorKey(s));
 	const colorOfSlice = (s: {
@@ -337,13 +359,19 @@ export default function SuburbPlot({
 		);
 	const dataTraces =
 		view === "yield"
-			? buildYieldTraces(yields, colorOfSlice)
+			? buildYieldTraces(visibleYields, colorOfSlice)
 			: buildTraces(activeSeries, colorMap);
 	// Long-dash forecast continuation lines + matching-hue interval bands.
 	// Pure-TS construction in suburb-plot-traces.ts so the shape is unit-
 	// tested without Plotly (see src/lib/suburb-plot-traces.test.ts).
+	// filterSeries() strips the forecast field when the source filter
+	// excludes forecasts, so buildForecastTrace returns [] for those
+	// survivors — but we also short-circuit explicitly so the intent is
+	// readable at the call site.
+	const includeForecast = shouldShowForecast(sourceFilter);
+	const includeImputedBand = shouldShowImputedBand(sourceFilter);
 	const forecastTraces =
-		view === "yield"
+		view === "yield" || !includeForecast
 			? []
 			: activeSeries.flatMap((s) =>
 					buildForecastTrace(s, intervals, colorOf(s)),
@@ -353,8 +381,13 @@ export default function SuburbPlot({
 	// smallest-horizon forecast interval — no separate ETL column needed,
 	// the bake's existing y_hat_lo_95 / hi_95 already encode it. Rendered
 	// BEFORE the data lines so the dotted imputed line paints on top.
+	// Note: filterSeries already drops imputed series when the filter
+	// excludes them, so this naturally produces [] in those modes. The
+	// extra `includeImputedBand` short-circuit also covers the case
+	// where a forecast survivor still carries its original imputed
+	// sibling info (defensive — current shape can't actually hit it).
 	const imputedBands =
-		view === "yield"
+		view === "yield" || !includeImputedBand
 			? []
 			: activeSeries.flatMap((s) =>
 					buildImputedBandTrace(
@@ -368,8 +401,17 @@ export default function SuburbPlot({
 	// reads as a "reference annotation" rather than primary data. Skipped
 	// on yield view since the dimensionless yield ratio doesn't share an
 	// axis with CPI's index scale.
+	// Data-only count drives the empty-view placeholder. Without this the
+	// source-filter could leave a chart with ONLY the CPI overlay visible,
+	// which reads as "the data is fine, here is inflation context" — a
+	// silent regression. CPI joins the trace list only if at least one
+	// real rental/sales/forecast/band trace would render.
+	const hasData =
+		dataTraces.length > 0 ||
+		forecastTraces.length > 0 ||
+		imputedBands.length > 0;
 	const traces =
-		cpi && cpi.length > 0 && view !== "yield"
+		cpi && cpi.length > 0 && view !== "yield" && hasData
 			? [
 					...imputedBands,
 					...dataTraces,
