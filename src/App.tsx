@@ -1,4 +1,5 @@
-import { DeckGL, type MapViewState } from "deck.gl";
+import { ScatterplotLayer } from "@deck.gl/layers";
+import { DeckGL, FlyToInterpolator, type MapViewState } from "deck.gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import { ControlPanel } from "@/components/ControlPanel";
@@ -7,6 +8,7 @@ import { SuburbPlotPanel } from "@/components/SuburbPlotPanel";
 import { TileMemoryOverlay } from "@/components/TileMemoryOverlay";
 import { useActiveHexSeries } from "@/hooks/useActiveHexSeries";
 import { useDuckDb } from "@/hooks/useDuckDb";
+import { useGeolocation } from "@/hooks/useGeolocation";
 import { useLatestRentalSeries } from "@/hooks/useLatestRentalSeries";
 import { useLayerVisibility } from "@/hooks/useLayerVisibility";
 import { useRegionH3Cells } from "@/hooks/useRegionH3Cells";
@@ -33,6 +35,11 @@ const INITIAL_VIEW_STATE: MapViewState = {
 	pitch: 0,
 	bearing: 0,
 };
+
+// Target zoom when the user flies to their own position — close enough to
+// pick out individual blocks, not so close that the surrounding context
+// vanishes. Matches the SAL detail-zoom in /explore/overview.
+const LOCATE_ZOOM = 14;
 
 const App = () => {
 	const status = useDuckDb();
@@ -91,6 +98,37 @@ const App = () => {
 	const { selection, setSelection } = useRegionSelection();
 	useSuburbMappings();
 
+	// Browser-Geolocation state machine + trigger. The hook is single-shot:
+	// every click re-issues `getCurrentPosition` for a fresh fix.
+	const { state: geoState, locate } = useGeolocation();
+
+	// Camera control: Deck.GL owns viewState during pan/zoom (per the
+	// `feedback_deckgl_native_render_loop` ADR memory — never lift viewState
+	// into React for the render loop). What we lift here is the *initial*
+	// view state, which is uncontrolled — Deck.GL only re-reads it when the
+	// reference changes. Attaching a FlyToInterpolator + transitionDuration
+	// on a fresh reference is the canonical Deck.GL way to animate to a new
+	// camera target without commandeering frame-by-frame viewState. The
+	// memo'd `layers` array doesn't depend on this state, so pan/zoom
+	// frames still don't allocate.
+	const [viewSeed, setViewSeed] = useState<MapViewState>(INITIAL_VIEW_STATE);
+	useEffect(() => {
+		if (geoState.status !== "granted") return;
+		setViewSeed({
+			longitude: geoState.longitude,
+			latitude: geoState.latitude,
+			zoom: LOCATE_ZOOM,
+			pitch: 0,
+			bearing: 0,
+			// FlyToInterpolator arcs the camera (zooms out, glides over,
+			// zooms back in) — feels purposeful even when the user is
+			// already nearby. ~1.6s is long enough to register as motion
+			// but short enough not to drag.
+			transitionDuration: 1600,
+			transitionInterpolator: new FlyToInterpolator({ speed: 1.4 }),
+		});
+	}, [geoState]);
+
 	// Live zoom label — imperative DOM update via this ref so the panel header
 	// can show the current zoom without lifting Deck.GL's viewState into React
 	// state (which would recreate the layer array on every pan/zoom frame).
@@ -126,10 +164,66 @@ const App = () => {
 		],
 	);
 
+	// User-location dot. Appended AFTER the catalogue so it paints above
+	// every basemap and overlay layer; otherwise the red pip would disappear
+	// inside SAL/LGA fills or under the hex overlay. Two concentric circles:
+	// a translucent accuracy halo sized in metres (so it scales with the
+	// map's zoom — a 50 m fix at z=14 reads as a visibly larger ring than
+	// the same fix at z=9), and a fixed-pixel red dot with a white outline
+	// so it stays legible on both light and dark basemaps.
+	const userLocationLayers = useMemo(() => {
+		if (geoState.status !== "granted") return [];
+		const point = {
+			position: [geoState.longitude, geoState.latitude] as [number, number],
+			accuracy: geoState.accuracy,
+		};
+		return [
+			new ScatterplotLayer({
+				id: "user-location-accuracy",
+				data: [point],
+				getPosition: (d) => d.position,
+				// `radius*Units: "meters"` is the magic — Deck.GL projects metres
+				// to pixels per the current viewport so the ring tracks the real
+				// accuracy circle as the user pans/zooms.
+				radiusUnits: "meters",
+				getRadius: (d) => d.accuracy,
+				radiusMinPixels: 8,
+				stroked: true,
+				filled: true,
+				getFillColor: [239, 68, 68, 30], // red-500 @ ~12%
+				getLineColor: [239, 68, 68, 140],
+				getLineWidth: 1,
+				lineWidthUnits: "pixels",
+				pickable: false,
+			}),
+			new ScatterplotLayer({
+				id: "user-location-dot",
+				data: [point],
+				getPosition: (d) => d.position,
+				radiusUnits: "pixels",
+				getRadius: 7,
+				stroked: true,
+				filled: true,
+				// red-500 on a white outline — the same "GPS pin" idiom Google
+				// Maps and Apple Maps use, so it reads instantly.
+				getFillColor: [239, 68, 68, 255],
+				getLineColor: [255, 255, 255, 255],
+				getLineWidth: 2,
+				lineWidthUnits: "pixels",
+				pickable: false,
+			}),
+		];
+	}, [geoState]);
+
+	const allLayers = useMemo(
+		() => [...layers, ...userLocationLayers],
+		[layers, userLocationLayers],
+	);
+
 	return (
 		<div className="absolute inset-0 bg-neutral-900">
 			<DeckGL
-				initialViewState={INITIAL_VIEW_STATE}
+				initialViewState={viewSeed}
 				onViewStateChange={(params) => {
 					// `viewState` is generically typed as MapViewState | TransitionProps;
 					// we know it's MapView here so a narrow cast is safe.
@@ -139,7 +233,7 @@ const App = () => {
 					}
 				}}
 				controller
-				layers={layers}
+				layers={allLayers}
 				getTooltip={pickToTooltip}
 			>
 				<BaseMap mapStyle={MAP_STYLE} />
@@ -152,6 +246,8 @@ const App = () => {
 				onSetAllVisibility={setAllVisibility}
 				zoomLabelRef={zoomLabelRef}
 				initialZoom={INITIAL_VIEW_STATE.zoom}
+				geoState={geoState}
+				onLocateMe={locate}
 			/>
 			{hexEnabled && (
 				<HexSeriesPicker

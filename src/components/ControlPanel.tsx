@@ -1,12 +1,35 @@
 import { type RefObject, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { DbStatus } from "@/hooks/useDuckDb";
+import type { GeolocationState } from "@/hooks/useGeolocation";
 import {
 	LAYER_DISPLAY_DEFS,
 	type LayerKey,
 	type LayerVisibility,
 } from "@/lib/layers";
 import { overlayThemeClass, useOverlayTheme } from "@/lib/theme";
+
+// Compact status line under the "Locate me" button. Granted shows accuracy
+// so the user can sanity-check the dot's precision; failure states surface
+// the browser's error message verbatim (it usually says something useful
+// like "User denied geolocation"), prefixed with our own verb so it reads
+// as our message, not a stack trace.
+const formatGeoStatus = (state: GeolocationState): string | null => {
+	switch (state.status) {
+		case "idle":
+			return null;
+		case "requesting":
+			return "Locating…";
+		case "granted":
+			return `±${Math.round(state.accuracy)} m`;
+		case "denied":
+			return "Permission denied — enable location in browser settings";
+		case "unavailable":
+			return state.message;
+		case "error":
+			return `Couldn't locate: ${state.message}`;
+	}
+};
 
 const DOT_COLOR: Record<DbStatus["state"], string> = {
 	loading: "#ffa500",
@@ -22,6 +45,8 @@ export const ControlPanel = ({
 	onSetAllVisibility,
 	zoomLabelRef,
 	initialZoom,
+	geoState,
+	onLocateMe,
 }: {
 	status: DbStatus;
 	visible: LayerVisibility;
@@ -30,6 +55,8 @@ export const ControlPanel = ({
 	onSetAllVisibility: (value: boolean) => void;
 	zoomLabelRef: RefObject<HTMLSpanElement | null>;
 	initialZoom: number;
+	geoState: GeolocationState;
+	onLocateMe: () => void;
 }) => {
 	// Default collapsed — keeps the map area clear; user expands when needed.
 	const [collapsed, setCollapsed] = useState(true);
@@ -133,6 +160,53 @@ export const ControlPanel = ({
 									Reset
 								</button>
 							</div>
+						</div>
+						{/* Locate-me row: a browser-geolocation trigger that drops a
+							red GPS pin on the map and flies the camera to it. Lives
+							inside the Layers section because the user-location dot is
+							itself a layer the user is toggling on — putting it next to
+							the layer list keeps the mental model consistent. */}
+						<div className="mb-2 flex items-center justify-between gap-2">
+							<button
+								type="button"
+								onClick={onLocateMe}
+								disabled={geoState.status === "requesting"}
+								aria-label="Locate me on the map"
+								data-testid="locate-me-button"
+								className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-neutral-300 bg-white px-2 py-1 text-neutral-800 text-xs hover:bg-neutral-50 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
+							>
+								<span aria-hidden="true">📍</span>
+								<span>
+									{geoState.status === "requesting"
+										? "Locating…"
+										: geoState.status === "granted"
+											? "Re-locate"
+											: "Locate me"}
+								</span>
+							</button>
+							{(() => {
+								const msg = formatGeoStatus(geoState);
+								if (!msg) return null;
+								// Error-ish states get a softer warning colour; the
+								// "granted" accuracy line gets the muted secondary
+								// colour so it doesn't compete with the layer list.
+								const isError =
+									geoState.status === "denied" ||
+									geoState.status === "unavailable" ||
+									geoState.status === "error";
+								return (
+									<span
+										data-testid="locate-me-status"
+										className={
+											isError
+												? "text-[11px] text-amber-700 dark:text-amber-400"
+												: "text-[11px] text-neutral-500 tabular-nums dark:text-neutral-400"
+										}
+									>
+										{msg}
+									</span>
+								);
+							})()}
 						</div>
 						{/* Bounded + scrollable so layers below the fold are reachable
 							on mobile and short viewports. The per-layer secondary
