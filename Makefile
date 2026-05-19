@@ -161,6 +161,7 @@ test-e2e-prod: install-ts ## Playwright smoke against the live deploy ($(PROD_UR
 
 e2e-report: install-ts ## Render e2e-screenshots/ into one review markdown (REPORT.md)
 	bun run scripts/render-e2e-report.ts
+	uvx --from md-toc md_toc --in-place --no-list-coherence github --header-levels 3 e2e-screenshots/REPORT.md
 
 # =============================================================================
 # Inner-loop meta-targets — `make fix ci` is the canonical sequence
