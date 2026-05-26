@@ -1,5 +1,10 @@
 import { ScatterplotLayer } from "@deck.gl/layers";
-import { DeckGL, FlyToInterpolator, type MapViewState } from "deck.gl";
+import {
+	DeckGL,
+	FlyToInterpolator,
+	LinearInterpolator,
+	type MapViewState,
+} from "deck.gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 import { ControlPanel } from "@/components/ControlPanel";
@@ -40,6 +45,20 @@ const INITIAL_VIEW_STATE: MapViewState = {
 // pick out individual blocks, not so close that the surrounding context
 // vanishes. Matches the SAL detail-zoom in /explore/overview.
 const LOCATE_ZOOM = 14;
+
+// Camera tilt applied when 3D extrusion is enabled. 60° matches Deck.GL's
+// default MapController `maxPitch` — the deepest interactive tilt the user
+// can drag to — so the toggle lands exactly where right-drag would top out.
+// MapLibre's underlying hard cap is 85°, but reaching that requires
+// `controller={{ maxPitch: 85 }}` on <DeckGL>; intentionally not doing that
+// here so the toggled value and the interactive ceiling stay in sync.
+const TILTED_PITCH = 60;
+
+// Normalise a Deck.GL bearing (-180..180) to a 0..359 compass reading so the
+// header readout doesn't flicker between "b -179°" and "b 179°".
+const formatBearing = (bearing: number): string =>
+	`b ${Math.round(((bearing % 360) + 360) % 360)}°`;
+const formatPitch = (pitch: number): string => `p ${Math.round(pitch)}°`;
 
 const App = () => {
 	const status = useDuckDb();
@@ -111,14 +130,30 @@ const App = () => {
 	// camera target without commandeering frame-by-frame viewState. The
 	// memo'd `layers` array doesn't depend on this state, so pan/zoom
 	// frames still don't allocate.
-	const [viewSeed, setViewSeed] = useState<MapViewState>(INITIAL_VIEW_STATE);
+	// Honour persisted hex3D on first paint so the camera doesn't snap from
+	// top-down to tilt during mount. The lazy initializer runs after hex3D's
+	// own lazy initializer (declared above), so `hex3D` is already correct.
+	const [viewSeed, setViewSeed] = useState<MapViewState>(() => ({
+		...INITIAL_VIEW_STATE,
+		pitch: hex3D ? TILTED_PITCH : 0,
+	}));
+	// Mirror hex3D into a ref so the locate-me effect can read the latest
+	// value without listing hex3D as a dep — otherwise a 3D toggle would
+	// re-fire locate-me with the last known geoState and teleport the user.
+	const hex3DRef = useRef(hex3D);
+	useEffect(() => {
+		hex3DRef.current = hex3D;
+	}, [hex3D]);
 	useEffect(() => {
 		if (geoState.status !== "granted") return;
 		setViewSeed({
 			longitude: geoState.longitude,
 			latitude: geoState.latitude,
 			zoom: LOCATE_ZOOM,
-			pitch: 0,
+			// Preserve the current 3D mode when teleporting — flipping back
+			// to top-down on every Locate would be jarring if the user has
+			// 3D enabled and is exploring extrusions.
+			pitch: hex3DRef.current ? TILTED_PITCH : 0,
 			bearing: 0,
 			// FlyToInterpolator arcs the camera (zooms out, glides over,
 			// zooms back in) — feels purposeful even when the user is
@@ -129,11 +164,53 @@ const App = () => {
 		});
 	}, [geoState]);
 
-	// Live zoom label — imperative DOM update via this ref so the panel header
-	// can show the current zoom without lifting Deck.GL's viewState into React
-	// state (which would recreate the layer array on every pan/zoom frame).
-	// Per the project's Deck.GL-native ADR memory.
+	// Live zoom/pitch/bearing labels — imperative DOM updates via these refs so
+	// the panel header can show the current camera pose without lifting
+	// Deck.GL's viewState into React state (which would recreate the layer
+	// array on every pan/zoom frame). Per the project's Deck.GL-native ADR
+	// memory.
 	const zoomLabelRef = useRef<HTMLSpanElement | null>(null);
+	const pitchLabelRef = useRef<HTMLSpanElement | null>(null);
+	const bearingLabelRef = useRef<HTMLSpanElement | null>(null);
+
+	// Live snapshot of the current viewState — read by the hex3D effect so a
+	// tilt toggle preserves the user's pan/zoom instead of teleporting back
+	// to INITIAL_VIEW_STATE. Updated by onViewStateChange alongside the label
+	// refs, same imperative pattern.
+	const viewStateRef = useRef<MapViewState>(INITIAL_VIEW_STATE);
+
+	// Animate the camera tilt on hex3D toggle. The first-mount tilt is
+	// already baked into viewSeed's lazy initializer, so we skip the initial
+	// effect run — otherwise we'd schedule a redundant transition on mount.
+	const skipFirstHex3DTransitionRef = useRef(true);
+	useEffect(() => {
+		if (skipFirstHex3DTransitionRef.current) {
+			skipFirstHex3DTransitionRef.current = false;
+			return;
+		}
+		const snap = viewStateRef.current;
+		setViewSeed({
+			longitude: snap.longitude,
+			latitude: snap.latitude,
+			zoom: snap.zoom,
+			// Enter 3D: tilt to TILTED_PITCH while keeping the user's
+			// current bearing (they may have already rotated the map).
+			// Exit 3D: snap back to top-down + north-up, the canonical
+			// default — a "top-down view" with residual bearing isn't really
+			// top-down for navigation purposes.
+			pitch: hex3D ? TILTED_PITCH : 0,
+			bearing: hex3D ? snap.bearing : 0,
+			transitionDuration: 700,
+			// LinearInterpolator with explicit transitionProps documents
+			// intent: we want a smooth tilt, not a fly-to arc. lat/lng are
+			// already at their target (same as snap), so excluding them
+			// from interpolation is a small perf win and avoids any
+			// floating-point drift mid-transition.
+			transitionInterpolator: new LinearInterpolator({
+				transitionProps: ["pitch", "bearing"],
+			}),
+		});
+	}, [hex3D]);
 
 	// Memoised so a status/loading-message re-render doesn't rebuild the layer
 	// array. Rebuilds only when visibility, manifests, or the selection setter
@@ -227,9 +304,16 @@ const App = () => {
 				onViewStateChange={(params) => {
 					// `viewState` is generically typed as MapViewState | TransitionProps;
 					// we know it's MapView here so a narrow cast is safe.
-					const zoom = (params.viewState as MapViewState).zoom;
-					if (zoomLabelRef.current && typeof zoom === "number") {
-						zoomLabelRef.current.textContent = `z ${zoom.toFixed(1)}`;
+					const vs = params.viewState as MapViewState;
+					viewStateRef.current = vs;
+					if (zoomLabelRef.current && typeof vs.zoom === "number") {
+						zoomLabelRef.current.textContent = `z ${vs.zoom.toFixed(1)}`;
+					}
+					if (pitchLabelRef.current && typeof vs.pitch === "number") {
+						pitchLabelRef.current.textContent = formatPitch(vs.pitch);
+					}
+					if (bearingLabelRef.current && typeof vs.bearing === "number") {
+						bearingLabelRef.current.textContent = formatBearing(vs.bearing);
 					}
 				}}
 				controller
@@ -245,7 +329,11 @@ const App = () => {
 				onResetVisibility={resetVisibility}
 				onSetAllVisibility={setAllVisibility}
 				zoomLabelRef={zoomLabelRef}
+				pitchLabelRef={pitchLabelRef}
+				bearingLabelRef={bearingLabelRef}
 				initialZoom={INITIAL_VIEW_STATE.zoom}
+				initialPitch={hex3D ? TILTED_PITCH : (INITIAL_VIEW_STATE.pitch ?? 0)}
+				initialBearing={INITIAL_VIEW_STATE.bearing ?? 0}
 				geoState={geoState}
 				onLocateMe={locate}
 			/>

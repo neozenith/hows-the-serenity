@@ -44,7 +44,11 @@ export const ControlPanel = ({
 	onResetVisibility,
 	onSetAllVisibility,
 	zoomLabelRef,
+	pitchLabelRef,
+	bearingLabelRef,
 	initialZoom,
+	initialPitch,
+	initialBearing,
 	geoState,
 	onLocateMe,
 }: {
@@ -54,7 +58,11 @@ export const ControlPanel = ({
 	onResetVisibility: () => void;
 	onSetAllVisibility: (value: boolean) => void;
 	zoomLabelRef: RefObject<HTMLSpanElement | null>;
+	pitchLabelRef: RefObject<HTMLSpanElement | null>;
+	bearingLabelRef: RefObject<HTMLSpanElement | null>;
 	initialZoom: number;
+	initialPitch: number;
+	initialBearing: number;
 	geoState: GeolocationState;
 	onLocateMe: () => void;
 }) => {
@@ -93,7 +101,11 @@ export const ControlPanel = ({
 				</button>
 				<div className="flex items-center gap-1.5">
 					{/* DOM-updated by the App's onViewStateChange — keeps textContent
-					    fresh without round-tripping through React state. */}
+					    fresh without round-tripping through React state. The three
+					    spans share styling and form a compact camera-pose readout:
+					    z = zoom level, p = pitch (0° = top-down, 45° = tilted),
+					    b = bearing (0° = north, increases clockwise). Tabular nums
+					    keep the digits from jittering as values change. */}
 					<span
 						ref={zoomLabelRef}
 						role="status"
@@ -101,6 +113,22 @@ export const ControlPanel = ({
 						className="text-neutral-500 text-xs tabular-nums dark:text-neutral-400"
 					>
 						z {initialZoom.toFixed(1)}
+					</span>
+					<span
+						ref={pitchLabelRef}
+						role="status"
+						aria-label="Current camera pitch in degrees"
+						className="text-neutral-500 text-xs tabular-nums dark:text-neutral-400"
+					>
+						p {Math.round(initialPitch)}°
+					</span>
+					<span
+						ref={bearingLabelRef}
+						role="status"
+						aria-label="Current camera bearing in degrees"
+						className="text-neutral-500 text-xs tabular-nums dark:text-neutral-400"
+					>
+						b {Math.round(((initialBearing % 360) + 360) % 360)}°
 					</span>
 					<ThemeToggle />
 					<button
