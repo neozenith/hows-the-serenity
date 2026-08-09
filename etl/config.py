@@ -94,6 +94,32 @@ PTV_TRANSIT_TIME_CACHE = PTV_ORIGINALS / "transit_time_cache"
 # Cumulative commute tiers (minutes) — one hull polygon per centre per tier.
 COMMUTE_HULL_TIERS = (15, 30, 45, 60)
 
+# Plausible in-service speed band per mode, km/h, including dwell time.
+#
+# The cached transit times come from Google Maps `mode="transit"`, which
+# returns the fastest journey by ANY public transport. A tram stop next to a
+# station therefore carries a *train* time: "Footscray Station/Leeds St #64"
+# caches 12.8 min for 6.03 km (28 km/h), a speed no tram achieves. Taking
+# |t(A) - t(B)| across such a pair yields a same-mode travel time that is
+# physically impossible.
+#
+# Each edge is therefore reconciled against its own along-track distance: the
+# cached difference is kept when it implies a speed inside this band, and
+# clamped to the band when it does not. The band is deliberately wide — the
+# goal is to reject the impossible, not to model the timetable.
+#
+# Calibrated against the cached field for the two train modes, where the
+# fastest transit journey usually *is* the train, so agreement is meaningful.
+# Median graph/cached time: metro train 1.21 -> 0.91, regional 1.44 -> 1.02.
+# Tram is not calibrated that way and must not be — its cached times are
+# frequently train journeys, so matching them would be matching the wrong
+# mode. Its band is physical: trams do 6-35 km/h in service.
+PTV_MODE_SPEED_BAND_KMH: dict[str, tuple[float, float]] = {
+    "METRO TRAIN": (12.0, 80.0),
+    "METRO TRAM": (6.0, 35.0),
+    "REGIONAL TRAIN": (35.0, 90.0),
+}
+
 # Rail-replacement services are tagged METRO TRAIN in the PTV feed but run on
 # roads, so their shapes must never contribute adjacency to the rail graph —
 # snapping stations onto a bus diversion invents track that does not exist.
@@ -109,18 +135,17 @@ PTV_NON_STATION_STOP_PATTERN = (
     r"bus\s*interchange|park\s*(&|and)\s*ride"
 )
 
-# Hull centres: (slug, display name, lon, lat, direct_times). Southern Cross
-# uses the cached minutes directly (the cache IS its distance field); the
-# regional hubs get times derived from the per-mode network graph. Centres
-# only produce hulls on networks they can snap to — the tram network doesn't
-# exist in Shepparton, so no tram hulls radiate from there.
-COMMUTE_CENTRES: tuple[tuple[str, str, float, float, bool], ...] = (
-    ("southern-cross", "Southern Cross", 144.95206, -37.81839, True),
-    ("geelong", "Geelong", 144.35499, -38.14424, False),
-    ("ballarat", "Ballarat", 143.85953, -37.55866, False),
-    ("bendigo", "Bendigo", 144.28285, -36.76560, False),
-    ("shepparton", "Shepparton", 145.40597, -36.38381, False),
-    ("traralgon", "Traralgon", 146.53890, -38.19855, False),
+# Hull centres: (slug, display name, lon, lat). Every centre's distance field
+# comes from the per-mode network graph, Southern Cross included. Centres only
+# produce hulls on networks they can snap to — the tram network doesn't exist
+# in Shepparton, so no tram hulls radiate from there.
+COMMUTE_CENTRES: tuple[tuple[str, str, float, float], ...] = (
+    ("southern-cross", "Southern Cross", 144.95206, -37.81839),
+    ("geelong", "Geelong", 144.35499, -38.14424),
+    ("ballarat", "Ballarat", 143.85953, -37.55866),
+    ("bendigo", "Bendigo", 144.28285, -36.76560),
+    ("shepparton", "Shepparton", 145.40597, -36.38381),
+    ("traralgon", "Traralgon", 146.53890, -38.19855),
 )
 
 # Hull render colours, mirroring the frontend palette in src/lib/layers.ts so

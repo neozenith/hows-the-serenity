@@ -330,6 +330,7 @@ def run(
     tiers: Sequence[int] = (15, 30, 45, 60),
     exclude_line_pattern: str | None = None,
     exclude_stop_pattern: str | None = None,
+    speed_band: tuple[float, float] | None = None,
 ) -> list[Path]:
     """Render one PNG per centre present in the hull file, plus a combined one."""
     if not hulls_geojson.exists():
@@ -343,7 +344,8 @@ def run(
         stops_parquet, cache_dir, mode_label, exclude_stop_pattern=exclude_stop_pattern
     )
     edges = add_transfer_edges(
-        nodes, build_edges(lines_parquet, nodes, mode_label, exclude_line_pattern)
+        nodes,
+        build_edges(lines_parquet, nodes, mode_label, exclude_line_pattern, speed_band=speed_band),
     )
     edge_paths = build_edge_paths(lines_parquet, nodes, mode_label, exclude_line_pattern)
     node_points = gpd.GeoDataFrame(
@@ -370,7 +372,7 @@ def run(
             graph_times, prev = dijkstra_with_paths(len(nodes), edges, nearest)
             # Southern Cross uses the cached scalars as its distance field, so
             # label with those; the tree still shows the graph's own routing.
-            times = nodes["minutes"].to_numpy(dtype=float) if centre.direct_times else graph_times
+            times = graph_times
             reachable = set(np.flatnonzero(times <= budget).tolist())
             graph = NetworkGraph(
                 xs=xs,

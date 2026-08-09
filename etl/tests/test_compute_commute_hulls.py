@@ -158,8 +158,8 @@ def test_run_skips_centres_the_network_cannot_reach(tmp_path: Path) -> None:
         cache_dir=cache_dir,
         mode_label="TEST TRAIN",
         centres=[
-            cch.Centre("on-net", "On Network", 144.90, -37.80, False),
-            cch.Centre("off-net", "Off Network", 149.00, -35.00, False),
+            cch.Centre("on-net", "On Network", 144.90, -37.80),
+            cch.Centre("off-net", "Off Network", 149.00, -35.00),
         ],
         tiers=(15, 30, 45, 60),
         output_geojson=out,
@@ -172,10 +172,14 @@ def test_run_skips_centres_the_network_cannot_reach(tmp_path: Path) -> None:
     assert gdf.geometry.is_valid.all()
 
 
-def test_run_southern_cross_centre_uses_cached_times_directly(tmp_path: Path) -> None:
-    """direct_times=True means the hull membership is the cached scalars, not
-    graph distances — primary measurement beats derived. Stop A has t=10, so
-    only A falls inside the 15-min tier.
+def test_every_centre_takes_membership_from_the_graph(tmp_path: Path) -> None:
+    """Membership is graph distance for every centre, Southern Cross included.
+
+    Reading the cached scalars directly for one centre made membership
+    multi-modal while the drawn network stayed single-mode, so a contour
+    could contain a stop with no path to it inside the budget. Measured from
+    A, the graph distances are 0/15/30/60, so the 45-min tier holds three
+    stops and D only appears at 60.
     """
     stops_parquet, lines_parquet, cache_dir = _write_fixtures(tmp_path)
     out = tmp_path / "hulls.geojson"
@@ -185,16 +189,40 @@ def test_run_southern_cross_centre_uses_cached_times_directly(tmp_path: Path) ->
         lines_parquet=lines_parquet,
         cache_dir=cache_dir,
         mode_label="TEST TRAIN",
-        centres=[cch.Centre("scs", "Southern Cross", 144.90, -37.80, True)],
+        centres=[cch.Centre("scs", "Southern Cross", 144.90, -37.80)],
         tiers=(15, 30, 45, 60),
         output_geojson=out,
     )
 
     gdf = gpd.read_file(out).set_index("transit_time_minutes_nearest_tier")
-    assert gdf.loc[15.0, "point_count"] == 1  # A only (t=10)
-    assert gdf.loc[30.0, "point_count"] == 2  # A + B (t=25)
-    assert gdf.loc[45.0, "point_count"] == 3  # A + B + C (t=40)
-    assert gdf.loc[60.0, "point_count"] == 3  # D is 70 min — still outside
+    assert gdf.loc[15.0, "point_count"] == 2  # A (0) + B (15)
+    assert gdf.loc[30.0, "point_count"] == 3  # + C (30)
+    assert gdf.loc[45.0, "point_count"] == 3  # D is 60 away — still outside
+    assert gdf.loc[60.0, "point_count"] == 4  # + D
+
+
+def test_speed_band_clamps_physically_impossible_edge_weights(tmp_path: Path) -> None:
+    """The cache is multi-modal, so |t(A) - t(B)| can imply an absurd speed.
+
+    C and D sit ~0.88 km apart with cached times 30 min apart — 1.8 km/h,
+    which no rail service does. Bounding the pair by its own along-track
+    distance replaces the fiction with the slowest speed the mode plausibly
+    runs at, while leaving plausible weights untouched.
+    """
+    stops_parquet, lines_parquet, cache_dir = _write_fixtures(tmp_path)
+    nodes = cch.load_stop_nodes(stops_parquet, cache_dir, "TEST TRAIN")
+    by_name = {n: i for i, n in enumerate(nodes["name"])}
+    c, d = by_name["C Station"], by_name["D Station"]
+    key = (min(c, d), max(c, d))
+
+    unclamped = cch.build_edges(lines_parquet, nodes, "TEST TRAIN")
+    assert unclamped[key] == pytest.approx(30.0)
+
+    clamped = cch.build_edges(lines_parquet, nodes, "TEST TRAIN", speed_band=(12.0, 80.0))
+    # 0.01 deg of longitude at -37.8 is ~0.88 km; at the 12 km/h floor that
+    # is ~4.4 min, so the 30-min claim is cut to roughly that.
+    assert clamped[key] < 30.0
+    assert clamped[key] == pytest.approx(4.4, abs=0.5)
 
 
 def test_replacement_bus_shapes_do_not_create_adjacency(tmp_path: Path) -> None:
@@ -278,7 +306,7 @@ def test_run_raises_when_no_centre_is_reachable(tmp_path: Path) -> None:
             lines_parquet=lines_parquet,
             cache_dir=cache_dir,
             mode_label="TEST TRAIN",
-            centres=[cch.Centre("off-net", "Off Network", 149.0, -35.0, False)],
+            centres=[cch.Centre("off-net", "Off Network", 149.0, -35.0)],
             tiers=(15, 30, 45, 60),
             output_geojson=tmp_path / "hulls.geojson",
         )

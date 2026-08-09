@@ -59,13 +59,15 @@ def run(
     output_dir: Path,
     exclude_line_pattern: str | None = None,
     exclude_stop_pattern: str | None = None,
+    speed_band: tuple[float, float] | None = None,
 ) -> list[Path]:
     """Write the MST and stop-time layers for each reachable centre."""
     nodes = load_stop_nodes(
         stops_parquet, cache_dir, mode_label, exclude_stop_pattern=exclude_stop_pattern
     )
     edges = add_transfer_edges(
-        nodes, build_edges(lines_parquet, nodes, mode_label, exclude_line_pattern)
+        nodes,
+        build_edges(lines_parquet, nodes, mode_label, exclude_line_pattern, speed_band=speed_band),
     )
     edge_paths = build_edge_paths(lines_parquet, nodes, mode_label, exclude_line_pattern)
 
@@ -88,7 +90,7 @@ def run(
             continue
 
         graph_times, prev = dijkstra_with_paths(len(nodes), edges, nearest)
-        times = nodes["minutes"].to_numpy(dtype=float) if centre.direct_times else graph_times
+        times = graph_times
         centre_records.append(
             {
                 "centre": centre.slug,

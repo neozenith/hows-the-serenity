@@ -17,9 +17,18 @@ adjacency; the absolute time difference becomes the edge weight. Dijkstra
 over that per-mode graph then gives minutes-from-centre for any centre node,
 so hulls can radiate from Geelong or Bendigo — not just Southern Cross.
 
-For the Southern Cross centre the cached scalars *are* the distance field
-(they include real-world waits and transfers), so they are used directly
-instead of the derived graph — primary measurements beat derived ones.
+Two properties of that cache constrain what can be built from it. It is
+multi-modal — Google Maps returns the fastest journey by ANY public
+transport, so a tram stop beside a station carries a train time — and it is
+not monotonic along a corridor, because express patterns let a station
+further out read faster than one closer in. Both break the subtraction, so
+every candidate weight is reconciled against the along-track distance
+between the pair and clamped to a plausible speed band for the mode.
+
+Every centre, Southern Cross included, takes its distance field from the
+graph. Reading it straight from the cache for one centre made membership
+multi-modal while the geometry stayed single-mode, which put stops inside
+tram contours that no tram reaches in the time.
 
 Each mode stays a separate network: tram, metro train and regional train
 graphs never share edges, matching the three separate hull layers.
@@ -31,6 +40,7 @@ import heapq
 import itertools
 import json
 import logging
+import math
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,14 +67,12 @@ CONCAVE_HULL_RATIO = 0.6  # matches the predecessor pipeline's hulls
 
 @dataclass(frozen=True)
 class Centre:
-    """A hull centre. ``direct_times`` marks the centre whose distance field
-    is exactly the cached minutes-to-Southern-Cross (i.e. Southern Cross)."""
+    """A hull centre: where a set of commute contours radiates from."""
 
     slug: str
     name: str
     lon: float
     lat: float
-    direct_times: bool = False
 
 
 def _cache_path(cache_dir: Path, stop_name: str) -> Path:
@@ -197,28 +205,75 @@ def _iter_adjacent_along_shapes(
                 yield a, b, part, projected[a], projected[b]
 
 
+# Degrees of latitude to kilometres. Longitude shrinks by cos(latitude); at
+# Victoria's ~-37.8 that is a 21% correction, too large to ignore.
+DEG_LAT_KM = 111.32
+
+
+def _along_track_km(delta_deg: float, latitude: float) -> float:
+    """Along-track distance in km for a projection delta in degrees.
+
+    Shape coordinates are lon/lat, so a projected distance mixes both axes.
+    Applying the cosine correction for the segment's latitude is accurate
+    enough for a plausibility check on inter-stop spacing.
+    """
+    return abs(delta_deg) * DEG_LAT_KM * math.cos(math.radians(latitude))
+
+
 def build_edges(
     lines_parquet: Path,
     nodes: pd.DataFrame,
     mode_label: str,
     exclude_line_pattern: str | None = None,
+    speed_band: tuple[float, float] | None = None,
 ) -> dict[tuple[int, int], float]:
     """Edges between stops adjacent along any route shape of the mode.
 
-    Weight = |minutes(A) - minutes(B)| — the telescoped point-to-point travel
+    Weight = |minutes(A) - minutes(B)|, the telescoped point-to-point travel
     time along the line, extracted from the cached radial scalars.
+
+    That subtraction assumes both cached times describe a journey on *this*
+    mode. They often do not: the cache is multi-modal, so a tram stop beside
+    a station carries a train time and the difference against its tram
+    neighbour is fiction. ``speed_band`` reconciles each candidate weight
+    against the along-track distance between the two stops and clamps
+    anything implying an impossible speed for the mode.
     """
     minutes = nodes["minutes"].to_numpy()
+    ys = nodes["y"].to_numpy(dtype=float)
     edges: dict[tuple[int, int], float] = {}
-    for a, b, _part, _da, _db in _iter_adjacent_along_shapes(
+    clamped = 0
+    for a, b, _part, da, db in _iter_adjacent_along_shapes(
         lines_parquet, nodes, mode_label, exclude_line_pattern
     ):
         key = (a, b) if a < b else (b, a)
-        weight = abs(float(minutes[a] - minutes[b]))
+        raw = abs(float(minutes[a] - minutes[b]))
+        weight = raw
+        if speed_band is not None:
+            # Along-track distance comes free from the projection: da and db
+            # are positions along the same shape, so |db - da| is rail
+            # distance, not a straight-line chord.
+            km = _along_track_km(abs(db - da), float((ys[a] + ys[b]) / 2))
+            slowest, fastest = min(speed_band), max(speed_band)
+            lo = km / fastest * 60.0
+            hi = km / slowest * 60.0
+            weight = min(max(raw, lo), hi)
+            if abs(weight - raw) > 1e-9:
+                clamped += 1
         prev = edges.get(key)
         if prev is None or weight < prev:
             edges[key] = weight
-    log.info("%s: %d unique adjacency edges", mode_label, len(edges))
+    if speed_band is not None:
+        log.info(
+            "%s: %d unique adjacency edges (%d weight candidates clamped to the %g-%g km/h band)",
+            mode_label,
+            len(edges),
+            clamped,
+            min(speed_band),
+            max(speed_band),
+        )
+    else:
+        log.info("%s: %d unique adjacency edges", mode_label, len(edges))
     return edges
 
 
@@ -330,6 +385,7 @@ def run(
     output_geojson: Path,
     exclude_line_pattern: str | None = None,
     exclude_stop_pattern: str | None = None,
+    speed_band: tuple[float, float] | None = None,
 ) -> int:
     """Compute cumulative commute-tier hulls for one mode across all centres.
 
@@ -344,7 +400,9 @@ def run(
     nodes = load_stop_nodes(
         stops_parquet, cache_dir, mode_label, exclude_stop_pattern=exclude_stop_pattern
     )
-    edges = build_edges(lines_parquet, nodes, mode_label, exclude_line_pattern)
+    edges = build_edges(
+        lines_parquet, nodes, mode_label, exclude_line_pattern, speed_band=speed_band
+    )
     edges = add_transfer_edges(nodes, edges)
 
     node_points = [Point(xy) for xy in zip(nodes["x"], nodes["y"], strict=True)]
@@ -366,12 +424,13 @@ def run(
             )
             continue
 
-        if centre.direct_times:
-            # The cache is minutes-to-Southern-Cross, i.e. exactly this
-            # centre's distance field, including real waits and transfers.
-            times = nodes["minutes"].to_numpy(dtype=float)
-        else:
-            times = dijkstra(len(nodes), edges, nearest)
+        # Always the graph, including Southern Cross. Using the cached
+        # scalars for that one centre made membership multi-modal while the
+        # geometry stayed single-mode, so a tram contour could contain a stop
+        # 147 minutes away by tram because a train reaches it in 12.8 —
+        # rendering as a node with no tree branch attached. One field for
+        # both keeps every contour answerable by the network drawn under it.
+        times = dijkstra(len(nodes), edges, nearest)
 
         for tier in sorted(tiers, reverse=True):
             member_idx = np.flatnonzero(times <= tier)
