@@ -197,6 +197,75 @@ def test_run_southern_cross_centre_uses_cached_times_directly(tmp_path: Path) ->
     assert gdf.loc[60.0, "point_count"] == 3  # D is 70 min — still outside
 
 
+def test_replacement_bus_shapes_do_not_create_adjacency(tmp_path: Path) -> None:
+    """Rail-replacement buses are tagged with the rail mode but run on roads.
+
+    Here a "bus" shape links A directly to D, skipping B and C. Left in, that
+    invents an A-D adjacency the railway has no equivalent for, and its weight
+    (|10 - 70| = 60 min) would let the time field leap across the network.
+    """
+    stops_parquet, lines_parquet, cache_dir = _write_fixtures(tmp_path)
+
+    rail = gpd.read_parquet(lines_parquet)
+    rail["SHORT_NAME"] = ["Rail"]
+    bus = gpd.GeoDataFrame(
+        {"MODE": ["TEST TRAIN"], "SHORT_NAME": ["Replacement Bus"]},
+        # A detour that touches only the first and last stop.
+        geometry=[LineString([(144.90, -37.80), (144.905, -37.85), (144.93, -37.80)])],
+        crs="EPSG:4326",
+    )
+    gpd.GeoDataFrame(pd.concat([rail, bus], ignore_index=True), crs="EPSG:4326").to_parquet(
+        lines_parquet
+    )
+
+    nodes = cch.load_stop_nodes(stops_parquet, cache_dir, "TEST TRAIN")
+    by_name = {n: i for i, n in enumerate(nodes["name"])}
+    a, d = by_name["A Station"], by_name["D Station"]
+
+    unfiltered = cch.build_edges(lines_parquet, nodes, "TEST TRAIN")
+    assert (min(a, d), max(a, d)) in unfiltered, "fixture should reproduce the bogus edge"
+
+    filtered = cch.build_edges(lines_parquet, nodes, "TEST TRAIN", r"replacement\s*bus")
+    assert (min(a, d), max(a, d)) not in filtered
+    # The genuine rail adjacency survives.
+    assert (min(a, by_name["B Station"]), max(a, by_name["B Station"])) in filtered
+
+
+def test_non_station_stops_are_excluded_from_the_graph(tmp_path: Path) -> None:
+    """Wayfinding markers and kerbside replacement stops are not stations.
+
+    They carry the rail MODE and pick up cached times, so without filtering
+    they become graph nodes and yield edges implying a few km/h.
+    """
+    stops_parquet, _lines, cache_dir = _write_fixtures(tmp_path)
+
+    stops = gpd.read_parquet(stops_parquet)
+    junk = gpd.GeoDataFrame(
+        {
+            "STOP_ID": ["j1", "j2"],
+            "STOP_NAME": ["Decision Point 3", "A Rail Replacement Bus Stop"],
+            "MODE": ["TEST TRAIN", "TEST TRAIN"],
+        },
+        geometry=[Point(144.905, -37.80), Point(144.9051, -37.80)],
+        crs="EPSG:4326",
+    )
+    gpd.GeoDataFrame(pd.concat([stops, junk], ignore_index=True), crs="EPSG:4326").to_parquet(
+        stops_parquet
+    )
+    for name in ("Decision Point 3", "A Rail Replacement Bus Stop"):
+        cch._cache_path(cache_dir, name).write_text(
+            json.dumps({"transit_time_minutes": 99.0}), encoding="utf-8"
+        )
+
+    kept = cch.load_stop_nodes(
+        stops_parquet,
+        cache_dir,
+        "TEST TRAIN",
+        exclude_stop_pattern=r"rail\s*replacement|decision\s*point",
+    )
+    assert sorted(kept["name"]) == ["A Station", "B Station", "C Station", "D Station"]
+
+
 def test_run_raises_when_no_centre_is_reachable(tmp_path: Path) -> None:
     """Producing zero hulls means the config is wrong; fail loudly rather
     than writing an empty layer the frontend would render as nothing.

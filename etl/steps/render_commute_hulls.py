@@ -328,6 +328,8 @@ def run(
     output_dir: Path,
     zoom: int | None = None,
     tiers: Sequence[int] = (15, 30, 45, 60),
+    exclude_line_pattern: str | None = None,
+    exclude_stop_pattern: str | None = None,
 ) -> list[Path]:
     """Render one PNG per centre present in the hull file, plus a combined one."""
     if not hulls_geojson.exists():
@@ -337,9 +339,13 @@ def run(
     hulls = gpd.read_file(hulls_geojson)
 
     # Recompute stop membership so the render shows the algorithm's real input.
-    nodes = load_stop_nodes(stops_parquet, cache_dir, mode_label)
-    edges = add_transfer_edges(nodes, build_edges(lines_parquet, nodes, mode_label))
-    edge_paths = build_edge_paths(lines_parquet, nodes, mode_label)
+    nodes = load_stop_nodes(
+        stops_parquet, cache_dir, mode_label, exclude_stop_pattern=exclude_stop_pattern
+    )
+    edges = add_transfer_edges(
+        nodes, build_edges(lines_parquet, nodes, mode_label, exclude_line_pattern)
+    )
+    edge_paths = build_edge_paths(lines_parquet, nodes, mode_label, exclude_line_pattern)
     node_points = gpd.GeoDataFrame(
         nodes.copy(), geometry=gpd.points_from_xy(nodes["x"], nodes["y"]), crs="EPSG:4326"
     )

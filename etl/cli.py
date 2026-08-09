@@ -34,7 +34,9 @@ from etl.config import (
     PTV_LINES_PARQUET,
     PTV_MODE_LABELS,
     PTV_MODES,
+    PTV_NON_STATION_STOP_PATTERN,
     PTV_ORIGINALS,
+    PTV_REPLACEMENT_LINE_PATTERN,
     PTV_STOP_KEEP_PROPERTIES,
     PTV_STOPS_GEOJSON,
     PTV_STOPS_PARQUET,
@@ -262,6 +264,8 @@ def cmd_compute_commute_hulls(args: argparse.Namespace) -> None:
         centres=[compute_commute_hulls.Centre(*c) for c in COMMUTE_CENTRES],
         tiers=COMMUTE_HULL_TIERS,
         output_geojson=_commute_hulls_source(args.mode),
+        exclude_line_pattern=PTV_REPLACEMENT_LINE_PATTERN,
+        exclude_stop_pattern=PTV_NON_STATION_STOP_PATTERN,
     )
 
 
@@ -281,6 +285,8 @@ def cmd_render_commute_hulls(args: argparse.Namespace) -> None:
             output_dir=args.output_dir,
             zoom=args.zoom,
             tiers=COMMUTE_HULL_TIERS,
+            exclude_line_pattern=PTV_REPLACEMENT_LINE_PATTERN,
+            exclude_stop_pattern=PTV_NON_STATION_STOP_PATTERN,
         )
 
 

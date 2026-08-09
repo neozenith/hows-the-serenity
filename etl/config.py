@@ -94,6 +94,21 @@ PTV_TRANSIT_TIME_CACHE = PTV_ORIGINALS / "transit_time_cache"
 # Cumulative commute tiers (minutes) — one hull polygon per centre per tier.
 COMMUTE_HULL_TIERS = (15, 30, 45, 60)
 
+# Rail-replacement services are tagged METRO TRAIN in the PTV feed but run on
+# roads, so their shapes must never contribute adjacency to the rail graph —
+# snapping stations onto a bus diversion invents track that does not exist.
+# 61 of 2484 metro-train shapes are replacement buses.
+PTV_REPLACEMENT_LINE_PATTERN = r"replacement\s*bus"
+
+# The same services bring their own stops: kerbside bus stops shadowing each
+# station (141 of 956 metro-train stops), plus wayfinding markers that are not
+# transit stops at all ("Decision Point 3", "Bus Interchange", "Park & Ride 2").
+# Left in, they become graph nodes and produce edges implying 2-5 km/h.
+PTV_NON_STATION_STOP_PATTERN = (
+    r"rail\s*replacement|replacement\s*bus|decision\s*point|"
+    r"bus\s*interchange|park\s*(&|and)\s*ride"
+)
+
 # Hull centres: (slug, display name, lon, lat, direct_times). Southern Cross
 # uses the cached minutes directly (the cache IS its distance field); the
 # regional hubs get times derived from the per-mode network graph. Centres

@@ -86,16 +86,40 @@ def _load_cached_minutes(cache_dir: Path, stop_name: str) -> float | None:
     return float(minutes) if minutes is not None else None
 
 
-def load_stop_nodes(stops_parquet: Path, cache_dir: Path, mode_label: str) -> pd.DataFrame:
+def load_stop_nodes(
+    stops_parquet: Path,
+    cache_dir: Path,
+    mode_label: str,
+    *,
+    exclude_stop_pattern: str | None = None,
+) -> pd.DataFrame:
     """One node per unique STOP_NAME for the mode, with cached minutes-to-SCS.
 
     Multiple platform rows collapse to the first point; stops without a cache
     entry are dropped (they carry no time signal so can't anchor an edge).
+    ``exclude_stop_pattern`` removes rail-replacement bus stops and wayfinding
+    markers, which are tagged with the rail mode but are not stations.
     """
     stops = gpd.read_parquet(stops_parquet)
     stops = stops[stops["MODE"] == mode_label]
     if stops.empty:
         raise ValueError(f"No stops found for MODE={mode_label!r} in {stops_parquet}")
+
+    if exclude_stop_pattern:
+        drop = (
+            stops["STOP_NAME"]
+            .astype(str)
+            .str.contains(exclude_stop_pattern, case=False, regex=True, na=False)
+        )
+        if drop.any():
+            log.info(
+                "%s: dropping %d non-station stops (replacement buses, wayfinding markers)",
+                mode_label,
+                int(drop.sum()),
+            )
+        stops = stops[~drop]
+        if stops.empty:
+            raise ValueError(f"All stops filtered out for MODE={mode_label!r}")
 
     records: list[dict[str, object]] = []
     for name, group in stops.groupby("STOP_NAME"):
@@ -117,18 +141,45 @@ def load_stop_nodes(stops_parquet: Path, cache_dir: Path, mode_label: str) -> pd
 
 
 def _iter_adjacent_along_shapes(
-    lines_parquet: Path, nodes: pd.DataFrame, mode_label: str
+    lines_parquet: Path,
+    nodes: pd.DataFrame,
+    mode_label: str,
+    exclude_line_pattern: str | None = None,
 ) -> Iterator[tuple[int, int, LineString, float, float]]:
     """Yield (a, b, shape, dist_a, dist_b) for stops adjacent along a shape.
 
     Single source of the snap-and-order logic, so edge weights and the edge
     geometries drawn in review renders can never disagree about which stops
     are adjacent or where they sit along the track.
+
+    ``exclude_line_pattern`` drops rail-replacement bus shapes. They are
+    tagged with the rail mode but routed over roads, so stations snap onto
+    them in road order and produce adjacency the railway does not have.
     """
-    lines = gpd.read_parquet(lines_parquet, columns=["MODE", "geometry"])
+    columns = ["MODE", "geometry"]
+    if exclude_line_pattern:
+        columns.append("SHORT_NAME")
+    lines = gpd.read_parquet(lines_parquet, columns=columns)
     lines = lines[lines["MODE"] == mode_label]
     if lines.empty:
         raise ValueError(f"No line shapes found for MODE={mode_label!r} in {lines_parquet}")
+
+    if exclude_line_pattern:
+        drop = (
+            lines["SHORT_NAME"]
+            .astype(str)
+            .str.contains(exclude_line_pattern, case=False, regex=True, na=False)
+        )
+        if drop.any():
+            log.info(
+                "%s: dropping %d replacement-bus shapes of %d",
+                mode_label,
+                int(drop.sum()),
+                len(lines),
+            )
+        lines = lines[~drop]
+        if lines.empty:
+            raise ValueError(f"All line shapes filtered out for MODE={mode_label!r}")
 
     points = [Point(xy) for xy in zip(nodes["x"], nodes["y"], strict=True)]
     tree = shapely.STRtree(points)
@@ -147,7 +198,10 @@ def _iter_adjacent_along_shapes(
 
 
 def build_edges(
-    lines_parquet: Path, nodes: pd.DataFrame, mode_label: str
+    lines_parquet: Path,
+    nodes: pd.DataFrame,
+    mode_label: str,
+    exclude_line_pattern: str | None = None,
 ) -> dict[tuple[int, int], float]:
     """Edges between stops adjacent along any route shape of the mode.
 
@@ -156,7 +210,9 @@ def build_edges(
     """
     minutes = nodes["minutes"].to_numpy()
     edges: dict[tuple[int, int], float] = {}
-    for a, b, _part, _da, _db in _iter_adjacent_along_shapes(lines_parquet, nodes, mode_label):
+    for a, b, _part, _da, _db in _iter_adjacent_along_shapes(
+        lines_parquet, nodes, mode_label, exclude_line_pattern
+    ):
         key = (a, b) if a < b else (b, a)
         weight = abs(float(minutes[a] - minutes[b]))
         prev = edges.get(key)
@@ -167,7 +223,10 @@ def build_edges(
 
 
 def build_edge_paths(
-    lines_parquet: Path, nodes: pd.DataFrame, mode_label: str
+    lines_parquet: Path,
+    nodes: pd.DataFrame,
+    mode_label: str,
+    exclude_line_pattern: str | None = None,
 ) -> dict[tuple[int, int], LineString]:
     """Track geometry for each adjacency edge, for drawing the network.
 
@@ -177,7 +236,9 @@ def build_edge_paths(
     stations are tens of kilometres apart, is a very different picture.
     """
     paths: dict[tuple[int, int], LineString] = {}
-    for a, b, part, da, db in _iter_adjacent_along_shapes(lines_parquet, nodes, mode_label):
+    for a, b, part, da, db in _iter_adjacent_along_shapes(
+        lines_parquet, nodes, mode_label, exclude_line_pattern
+    ):
         key = (a, b) if a < b else (b, a)
         segment = substring(part, min(da, db), max(da, db))
         # Keep the shortest candidate: express and stopping patterns share
@@ -267,6 +328,8 @@ def run(
     centres: Sequence[Centre],
     tiers: Sequence[int],
     output_geojson: Path,
+    exclude_line_pattern: str | None = None,
+    exclude_stop_pattern: str | None = None,
 ) -> int:
     """Compute cumulative commute-tier hulls for one mode across all centres.
 
@@ -278,8 +341,10 @@ def run(
     if not cache_dir.exists():
         raise FileNotFoundError(f"Transit-time cache not found: {cache_dir}")
 
-    nodes = load_stop_nodes(stops_parquet, cache_dir, mode_label)
-    edges = build_edges(lines_parquet, nodes, mode_label)
+    nodes = load_stop_nodes(
+        stops_parquet, cache_dir, mode_label, exclude_stop_pattern=exclude_stop_pattern
+    )
+    edges = build_edges(lines_parquet, nodes, mode_label, exclude_line_pattern)
     edges = add_transfer_edges(nodes, edges)
 
     node_points = [Point(xy) for xy in zip(nodes["x"], nodes["y"], strict=True)]
