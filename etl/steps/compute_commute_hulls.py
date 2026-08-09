@@ -41,16 +41,19 @@ import itertools
 import json
 import logging
 import math
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
+from pyproj import Transformer
 from shapely.geometry import LineString, Point
 from shapely.ops import substring, unary_union
+from shapely.ops import transform as shapely_transform
 
 log = logging.getLogger("etl.steps.compute_commute_hulls")
 
@@ -58,11 +61,33 @@ log = logging.getLogger("etl.steps.compute_commute_hulls")
 STOP_TO_LINE_TOLERANCE_DEG = 0.001  # ~110 m: stop counts as "on" a route shape
 TRANSFER_TOLERANCE_DEG = 0.002  # ~220 m: same-station nodes join for free
 CENTRE_SNAP_TOLERANCE_DEG = 0.01  # ~1.1 km: centre must be this close to a node
-# Buffer applied to member stops before hulling so sparse/collinear tiers
-# (e.g. 15 min around Shepparton, a handful of stops along one track) still
-# produce a visible polygon instead of a degenerate sliver.
-HULL_POINT_BUFFER_DEG = 0.003  # ~330 m
-CONCAVE_HULL_RATIO = 0.6  # matches the predecessor pipeline's hulls
+# Hull geometry is built in EPSG:3111 (VicGrid94), so every constant below is
+# metres. Buffering in degrees was subtly wrong: at Melbourne's latitude a
+# degree of longitude is 88 km against 111 km of latitude, so a `buffer(deg)`
+# came out 21% narrower east-west than north-south.
+HULL_CRS = "EPSG:3111"
+
+# Station catchment: how far you can actually walk from a platform. Measured
+# from this project's own `isochrones_foot` layer rather than assumed — the
+# 15-minute contour has a median equivalent-circle radius of 839 m (IQR
+# 738-928 m), i.e. an effective 3.4 km/h once the street network is followed,
+# not the 4.4 km/h of a straight line.
+WALK_15_MIN_RADIUS_M = 840.0
+# The same measurement for the 5-minute contour: 269 m. Used for the ribbon
+# along the track, because track between stations is not boardable — that
+# ribbon is a geometric connector that keeps the contour simply-connected,
+# not a claim of access.
+WALK_5_MIN_RADIUS_M = 270.0
+
+CONCAVE_HULL_RATIO = 0.15
+# Max spacing between vertices fed to the concave hull. See `_tier_hull`.
+HULL_SEGMENT_M = 1_000.0
+# Douglas-Peucker tolerance applied to the finished contour. See `_tier_hull`.
+HULL_SIMPLIFY_M = 50.0
+# Morphological closing radius: dilate then erode by the same amount, which
+# fills the notches where a corridor meets a station catchment at a narrow
+# angle without growing the contour's overall extent.
+HULL_CLOSING_M = 400.0
 
 
 @dataclass(frozen=True)
@@ -362,16 +387,129 @@ def dijkstra(n_nodes: int, edges: dict[tuple[int, int], float], source: int) -> 
     return dist
 
 
-def _tier_hull(member_points: Iterable[Point]) -> shapely.Geometry | None:
-    """Concave hull of the buffered member stops; None if no members."""
-    buffered = [p.buffer(HULL_POINT_BUFFER_DEG) for p in member_points]
-    if not buffered:
+def _tree_lines(
+    members: set[int],
+    prev: Sequence[int | None],
+    edge_paths: dict[tuple[int, int], LineString],
+    node_points: Sequence[Point],
+) -> list[LineString]:
+    """The shortest-path tree branches that lie wholly inside one tier.
+
+    Transfer edges (same-station nodes joined for free) have no track geometry,
+    so they fall back to a straight segment — which is honest: a transfer is a
+    walk across a platform, not a rail movement.
+    """
+    lines: list[LineString] = []
+    for v in sorted(members):
+        parent = prev[v]
+        if parent is None or parent not in members:
+            continue
+        key = (parent, v) if parent < v else (v, parent)
+        path = edge_paths.get(key)
+        lines.append(
+            path if path is not None else LineString([node_points[parent], node_points[v]])
+        )
+    return lines
+
+
+@lru_cache(maxsize=1)
+def _hull_transformers() -> tuple[
+    Callable[[shapely.Geometry], shapely.Geometry],
+    Callable[[shapely.Geometry], shapely.Geometry],
+]:
+    """WGS84 <-> VicGrid94 geometry transforms, built once.
+
+    `pyproj.Transformer` construction is expensive relative to the transform
+    itself, and `_tier_hull` runs once per centre per tier.
+    """
+    forward = Transformer.from_crs("EPSG:4326", HULL_CRS, always_xy=True)
+    inverse = Transformer.from_crs(HULL_CRS, "EPSG:4326", always_xy=True)
+    return (
+        lambda geom: shapely_transform(forward.transform, geom),
+        lambda geom: shapely_transform(inverse.transform, geom),
+    )
+
+
+def _fill_holes(geom: shapely.Geometry) -> shapely.Geometry:
+    """Drop interior rings, keeping only each part's outline.
+
+    Unioning a stop blob with a branching corridor leaves lens-shaped voids
+    wherever two branches rejoin — the area between the Ararat and Maryborough
+    lines out of Ballarat, say. Those voids are an artefact of how the shape was
+    assembled, not a statement that the enclosed land is unreachable, and they
+    read as noise. `concave_hull(allow_holes=False)` only covers the blob term,
+    so the final geometry is cleaned here instead.
+    """
+    polys = geom.geoms if geom.geom_type == "MultiPolygon" else [geom]
+    return unary_union([shapely.Polygon(p.exterior) for p in polys if p.geom_type == "Polygon"])
+
+
+def _tier_hull(
+    member_points: Iterable[Point],
+    tree_lines: Iterable[LineString] = (),
+) -> shapely.Geometry | None:
+    """Contour enclosing the reachable stops *and* the tree that reaches them.
+
+    Two terms, unioned:
+
+    * each reachable station's 15-minute walking catchment — where a rider can
+      actually start or finish a journey; and
+    * a thin ribbon along the shortest-path tree's own track geometry.
+
+    The station term alone was the original implementation, and it fails
+    wherever stations are far apart. Between Ballarat and Ballan the hull draws
+    a straight chord while the rail line bows south, so the very tree the
+    contour is meant to describe runs outside it. Unioning the ribbon in makes
+    containment structural rather than incidental: a shape built from the tree
+    cannot exclude it.
+
+    The two radii differ on purpose. A station gets the full 15-minute walk
+    because you can board there; the track between stations gets the 5-minute
+    radius, because that ribbon exists to keep the contour connected, not to
+    claim you can flag down a train in a paddock.
+
+    Input and output are EPSG:4326; the work happens in projected metres.
+    """
+    points = list(member_points)
+    if not points:
         return None
-    merged = unary_union(buffered)
-    hull = shapely.concave_hull(merged, ratio=CONCAVE_HULL_RATIO, allow_holes=False)
+    to_metres, to_degrees = _hull_transformers()
+    buffered = [to_metres(p).buffer(WALK_15_MIN_RADIUS_M) for p in points]
+    lines = [to_metres(ls) for ls in tree_lines]
+    corridor = unary_union(lines).buffer(WALK_5_MIN_RADIUS_M) if lines else None
+    base = unary_union(buffered if corridor is None else [*buffered, corridor])
+    # Hull the corridor, not the bare stops. Hulling 16 isolated regional
+    # stations threw straight chords tens of kilometres across empty farmland;
+    # hulling the corridor's own outline keeps the contour near the rails while
+    # still closing the wedge between two branches out of the same centre. On a
+    # dense metro network the corridor is a mesh, so the result is the familiar
+    # blob it always was.
+    # Densify first: `concave_hull`'s ratio is relative to the longest edge in
+    # the Delaunay triangulation of the input's *vertices*, so a corridor whose
+    # outline has few, widely-spaced points degenerates to a convex hull no
+    # matter how tight the ratio. Segmentizing gives the triangulation enough
+    # vertices for the ratio to mean what it says.
+    parts: list[shapely.Geometry] = [
+        shapely.concave_hull(
+            shapely.segmentize(base, HULL_SEGMENT_M),
+            ratio=CONCAVE_HULL_RATIO,
+            allow_holes=False,
+        )
+    ]
+    # Union the corridor back in: concave_hull may cut a corner off a hairpin,
+    # and containment of the tree is the one property this shape must have.
+    if corridor is not None:
+        parts.append(corridor)
+    # Closing only ever adds area, so it cannot push the tree back outside.
+    hull = _fill_holes(unary_union(parts).buffer(HULL_CLOSING_M).buffer(-HULL_CLOSING_M))
+    # Segmentizing and buffering leave far more vertices than the shape needs.
+    # Douglas-Peucker bounds its own deviation by the tolerance, so dilating by
+    # that same tolerance afterwards guarantees the simplified ring still covers
+    # everything the original did — containment survives the diet.
+    hull = hull.simplify(HULL_SIMPLIFY_M).buffer(HULL_SIMPLIFY_M)
     if hull.is_empty:
         return None
-    return hull
+    return to_degrees(hull)
 
 
 def run(
@@ -404,6 +542,9 @@ def run(
         lines_parquet, nodes, mode_label, exclude_line_pattern, speed_band=speed_band
     )
     edges = add_transfer_edges(nodes, edges)
+    # Track geometry per edge, so each tier's contour can be grown from the
+    # rails the tree actually runs on rather than from chords between stops.
+    edge_paths = build_edge_paths(lines_parquet, nodes, mode_label, exclude_line_pattern)
 
     node_points = [Point(xy) for xy in zip(nodes["x"], nodes["y"], strict=True)]
     tree = shapely.STRtree(node_points)
@@ -430,11 +571,15 @@ def run(
         # 147 minutes away by tram because a train reaches it in 12.8 —
         # rendering as a node with no tree branch attached. One field for
         # both keeps every contour answerable by the network drawn under it.
-        times = dijkstra(len(nodes), edges, nearest)
+        times, prev = dijkstra_with_paths(len(nodes), edges, nearest)
 
         for tier in sorted(tiers, reverse=True):
             member_idx = np.flatnonzero(times <= tier)
-            hull = _tier_hull([node_points[int(i)] for i in member_idx])
+            members = {int(i) for i in member_idx}
+            hull = _tier_hull(
+                [node_points[int(i)] for i in member_idx],
+                _tree_lines(members, prev, edge_paths, node_points),
+            )
             if hull is None:
                 log.info(
                     "%s / %s / %dmin: no reachable stops — skipping tier",

@@ -92,7 +92,7 @@ PTV_LINES_PARQUET = PTV_ORIGINALS / "public_transport_lines.parquet"
 PTV_TRANSIT_TIME_CACHE = PTV_ORIGINALS / "transit_time_cache"
 
 # Cumulative commute tiers (minutes) — one hull polygon per centre per tier.
-COMMUTE_HULL_TIERS = (15, 30, 45, 60)
+COMMUTE_HULL_TIERS = (15, 30, 45, 60, 75, 90)
 
 # Plausible in-service speed band per mode, km/h, including dwell time.
 #

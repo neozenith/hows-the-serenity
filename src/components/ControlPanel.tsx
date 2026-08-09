@@ -3,7 +3,6 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import type { DbStatus } from "@/hooks/useDuckDb";
 import type { GeolocationState } from "@/hooks/useGeolocation";
 import {
-	GROUPED_LAYER_DEFS,
 	LAYER_DISPLAY_DEFS,
 	type LayerKey,
 	type LayerVisibility,
@@ -246,7 +245,7 @@ export const ControlPanel = ({
 							data-testid="layer-list-scroll"
 						>
 							<ul className="space-y-1.5">
-								{LAYER_DISPLAY_DEFS.filter((l) => !l.group).map((layer) => (
+								{LAYER_DISPLAY_DEFS.map((layer) => (
 									<li key={layer.key}>
 										<label className="flex cursor-pointer items-center gap-2 text-neutral-700 dark:text-neutral-300">
 											<input
@@ -262,38 +261,6 @@ export const ControlPanel = ({
 									</li>
 								))}
 							</ul>
-							{/* Grouped layers (currently the commute-graph debug set)
-								collapse behind a <details> per group. They are opt-in
-								diagnostics, so they stay folded away until wanted
-								instead of pushing the everyday layers off-screen. */}
-							{GROUPED_LAYER_DEFS.map(([group, layersInGroup]) => (
-								<details
-									key={group}
-									className="mt-2 border-neutral-200 border-t pt-2 dark:border-neutral-700"
-									data-testid={`layer-group-${group}`}
-								>
-									<summary className="cursor-pointer text-neutral-600 text-xs dark:text-neutral-400">
-										{group}
-									</summary>
-									<ul className="mt-1.5 space-y-1.5 pl-3">
-										{layersInGroup.map((layer) => (
-											<li key={layer.key}>
-												<label className="flex cursor-pointer items-center gap-2 text-neutral-700 dark:text-neutral-300">
-													<input
-														type="checkbox"
-														className="h-3.5 w-3.5 cursor-pointer accent-neutral-700 dark:accent-neutral-300"
-														checked={visible[layer.key]}
-														onChange={() => onToggle(layer.key)}
-													/>
-													<span className="text-neutral-900 dark:text-neutral-50">
-														{layer.label}
-													</span>
-												</label>
-											</li>
-										))}
-									</ul>
-								</details>
-							))}
 						</div>
 					</section>
 				</div>

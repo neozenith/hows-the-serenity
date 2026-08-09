@@ -41,10 +41,9 @@ export const manifestUrl = (dir: string) =>
 // `tileUrl` above); the two schemes are intentionally independent.
 const COMMUTE_HULLS_TRAIN_PATH = "data/commute_hulls_metro_train.geojson";
 const COMMUTE_HULLS_TRAM_PATH = "data/commute_hulls_metro_tram.geojson";
-// Per-centre hull files, published alongside the combined layer so each
-// centre can be reviewed in isolation while the hull geometry is being
-// corrected. `data/commute_hulls_regional_train.geojson` remains the merged
-// layer we switch back to once the shapes are settled.
+// The regional network radiates from six hubs whose contours overlap heavily
+// around Melbourne. One file (and one toggle) per centre is what keeps that
+// layer readable — see REGIONAL_HULL_CENTRES.
 const commuteHullPath = (mode: string, centre: string) =>
 	`data/commute_hulls_${mode}__${centre}.geojson`;
 const LGA_GEOJSON_PATH = "data/selected_lga_2024_aust_gda2020.geojson";
@@ -62,14 +61,16 @@ const TRAM_COLOR: RGB = [120, 190, 32]; // Yarra Trams #78BE20
 // the three regional layers keep matching, as the metro/tram pairs do.
 const REGIONAL_TRAIN_COLOR: RGB = [158, 105, 211]; // brightened V/Line #9E69D3
 
-// Commute-tier hull alpha per band — closer-to-CBD = more opaque, fades
-// outward so the boundary "recedes" with travel time. Linear ramp 50%→80%
-// (128→204 in 0–255 space). Tiers are 15/30/45/60 min from Southern Cross.
+// Commute-tier hull alpha per band — closer-to-centre = more opaque, fading
+// outward so the boundary "recedes" with travel time. Linear ramp across the
+// six tiers (15 through 90 minutes), 80% down to 41%.
 const COMMUTE_TIER_ALPHA: Record<number, number> = {
 	15: 204,
-	30: 178,
-	45: 153,
-	60: 128,
+	30: 184,
+	45: 164,
+	60: 144,
+	75: 124,
+	90: 104,
 };
 const commuteTierColor =
 	(base: RGB) =>
@@ -114,10 +115,9 @@ const tileLifecycle = (layerId: string) => ({
 // plot panel and need to win z-order against every other layer (including
 // picking precedence).
 
-// One layer per (mode, centre) while hull geometry is under review — see
-// REGIONAL_HULL_CENTRES below. Splitting them means a bad contour can be
-// isolated to a single centre by toggling, instead of being buried in a
-// 24-polygon combined layer.
+// Metro and tram each radiate from a single centre, so one layer each. The
+// regional network has six, and their 90-minute contours all reach Melbourne,
+// so they get one layer per centre rather than a single 36-polygon pile.
 type CommuteHullKey =
 	| "commuteTrain"
 	| "commuteTram"
@@ -247,7 +247,6 @@ type HexagonSeriesSpec = {
 
 export type LayerSpec =
 	| CommuteHullSpec
-	| CommuteDebugSpec
 	| LgaSpec
 	| IsoSpec
 	| PtvLineSpec
@@ -270,7 +269,6 @@ export type TileLayerKey = Exclude<
 	LayerKey,
 	| LgaSpec["key"]
 	| CommuteHullSpec["key"]
-	| CommuteDebugSpec["key"]
 	| TileGridSpec["key"]
 	| HexagonSeriesSpec["key"]
 >;
@@ -278,124 +276,8 @@ export type TileLayerKey = Exclude<
 export type LayerVisibility = Record<LayerKey, boolean>;
 export type Manifests = Record<TileLayerKey, LoadedManifest | null>;
 
-// --- Commute-graph debug layers ----------------------------------------------
-//
-// The hull polygons are a lossy summary of a graph, so when a contour looks
-// wrong the only way to answer "which stops and which hops produced it" is to
-// put the graph itself on the map. These layers mirror what the review PNGs
-// (`make hull-preview`) show — per-tier contour, shortest-path tree, and each
-// stop's cumulative minutes — so a shape can be interrogated in place.
-//
-// Keys are generated rather than enumerated: mode x centre x tier x artefact
-// is ~100 layers, which is a template literal's job, not a hand-written union.
-// Every one of them defaults OFF; this is a debugging surface, not part of the
-// normal map.
-type CommuteDebugKind = "hull" | "mst" | "times";
-type CommuteDebugKey = `dbg:${string}`;
-
-type CommuteDebugSpec = {
-	kind: "commuteDebug";
-	key: CommuteDebugKey;
-	layerId: string;
-	label: string;
-	hint: string;
-	// Panel section this layer collapses under.
-	group: string;
-	urlPath: string;
-	// Features are published with a `tier` property and filtered client-side,
-	// so one fetch per (mode, centre) serves all four tier layers.
-	tier: number | null;
-	artefact: CommuteDebugKind | "centres";
-	baseColor: RGB;
-};
-
-const COMMUTE_DEBUG_TIERS = [15, 30, 45, 60] as const;
-
-const COMMUTE_DEBUG_NETWORKS = [
-	{
-		mode: "metro_train",
-		modeLabel: "Train",
-		color: TRAIN_COLOR,
-		centres: [{ slug: "southern-cross", name: "Southern Cross" }],
-	},
-	{
-		mode: "metro_tram",
-		modeLabel: "Tram",
-		color: TRAM_COLOR,
-		centres: [{ slug: "southern-cross", name: "Southern Cross" }],
-	},
-	{
-		mode: "regional_train",
-		modeLabel: "V/Line",
-		color: REGIONAL_TRAIN_COLOR,
-		centres: [
-			{ slug: "southern-cross", name: "Southern Cross" },
-			{ slug: "geelong", name: "Geelong" },
-			{ slug: "ballarat", name: "Ballarat" },
-			{ slug: "bendigo", name: "Bendigo" },
-			{ slug: "shepparton", name: "Shepparton" },
-			{ slug: "traralgon", name: "Traralgon" },
-		],
-	},
-] as const;
-
-const ARTEFACT_LABEL: Record<CommuteDebugKind, string> = {
-	hull: "hull",
-	mst: "tree",
-	times: "times",
-};
-
-const commuteDebugSpecs = (): CommuteDebugSpec[] => {
-	const specs: CommuteDebugSpec[] = [
-		{
-			kind: "commuteDebug",
-			key: "dbg:centres",
-			layerId: "commute-debug-centres",
-			label: "Commute centres",
-			hint: "Hull centre nodes, per network",
-			group: "Commute debug",
-			urlPath: "data/commute_centres.geojson",
-			tier: null,
-			artefact: "centres",
-			baseColor: [255, 93, 115],
-		},
-	];
-	for (const net of COMMUTE_DEBUG_NETWORKS) {
-		for (const centre of net.centres) {
-			const group = `Debug · ${net.modeLabel} · ${centre.name}`;
-			const files: Record<CommuteDebugKind, string> = {
-				hull: `data/commute_hulls_${net.mode}__${centre.slug}.geojson`,
-				mst: `data/commute_mst_${net.mode}__${centre.slug}.geojson`,
-				times: `data/commute_times_${net.mode}__${centre.slug}.geojson`,
-			};
-			for (const artefact of ["hull", "mst", "times"] as const) {
-				for (const tier of COMMUTE_DEBUG_TIERS) {
-					specs.push({
-						kind: "commuteDebug",
-						key: `dbg:${artefact}:${net.mode}:${centre.slug}:${tier}`,
-						layerId: `commute-debug-${artefact}-${net.mode}-${centre.slug}-t${tier}`,
-						label: `${ARTEFACT_LABEL[artefact]} · ${tier} min`,
-						hint: `${net.modeLabel} ${ARTEFACT_LABEL[artefact]} within ${tier} min of ${centre.name}`,
-						group,
-						urlPath: files[artefact],
-						tier,
-						artefact,
-						baseColor: net.color,
-					});
-				}
-			}
-		}
-	}
-	return specs;
-};
-
-const COMMUTE_DEBUG_SPECS: readonly CommuteDebugSpec[] = commuteDebugSpecs();
-
-// The six centres the regional network reaches, each published as its own
-// GeoJSON by `etl publish commute-hulls`. Kept as one table so the layer
-// key, file name and on-map label can never drift apart; collapsing these
-// back into a single combined layer is a matter of deleting this block and
-// restoring one spec pointed at commute_hulls_regional_train.geojson.
+// One table so the layer key, the published file name and the on-map label can
+// never drift apart.
 const REGIONAL_HULL_CENTRES = [
 	{
 		key: "commuteRegionalSouthernCross",
@@ -419,7 +301,7 @@ const REGIONAL_HULL_SPECS: readonly CommuteHullSpec[] =
 		key: c.key,
 		layerId: `commute-hulls-regional-${c.slug}`,
 		label: `V/Line hulls · ${c.name}`,
-		hint: `15/30/45/60-min from ${c.name}`,
+		hint: `15–90 min from ${c.name}`,
 		urlPath: commuteHullPath("regional_train", c.slug),
 		baseColor: REGIONAL_TRAIN_COLOR,
 		modeShort: "vline",
@@ -431,7 +313,7 @@ const SPECS: readonly LayerSpec[] = [
 		key: "commuteTrain",
 		layerId: "commute-hulls-train",
 		label: "Train commute hulls",
-		hint: "15/30/45/60-min from Southern Cross",
+		hint: "15–90 min from Southern Cross",
 		urlPath: COMMUTE_HULLS_TRAIN_PATH,
 		baseColor: TRAIN_COLOR,
 		modeShort: "train",
@@ -441,15 +323,12 @@ const SPECS: readonly LayerSpec[] = [
 		key: "commuteTram",
 		layerId: "commute-hulls-tram",
 		label: "Tram commute hulls",
-		hint: "15/30/45/60-min from Southern Cross",
+		hint: "15–90 min from Southern Cross",
 		urlPath: COMMUTE_HULLS_TRAM_PATH,
 		baseColor: TRAM_COLOR,
 		modeShort: "tram",
 	},
 	...REGIONAL_HULL_SPECS,
-	// Debug layers render above the hulls they explain, but below everything
-	// else, so switching one on annotates the map rather than covering it.
-	...COMMUTE_DEBUG_SPECS,
 	// LGA polygons — clickable for LGA-tier rental data. Drawn under SAL so
 	// when both layers are on, SAL (last in the catalogue) wins click
 	// precedence inside its smaller polygons; LGA picks up clicks that land
@@ -708,9 +587,8 @@ const DISPLAY_ORDER: readonly LayerKey[] = [
 	"schoolStandaloneJuniorsec",
 	"schoolStandaloneSeniorsec",
 	"schoolStandaloneSinglesex",
-	// Debug overlays last so they sit at the bottom of the toggle list.
+	// Debug overlay last so it sits at the bottom of the toggle list.
 	"tileGrid",
-	...COMMUTE_DEBUG_SPECS.map((s) => s.key),
 ];
 
 const SPEC_BY_KEY = SPECS.reduce(
@@ -755,9 +633,6 @@ export const LAYER_DIRS: Record<TileLayerKey, string> = SPECS.reduce(
 // their picker selection visible.
 const DEFAULT_OFF: ReadonlySet<LayerKey> = new Set<LayerKey>([
 	"tileGrid",
-	// Every commute-graph debug layer is opt-in — ~100 of them rendering by
-	// default would bury the map.
-	...COMMUTE_DEBUG_SPECS.map((s) => s.key),
 	// School zones default OFF — 10 levels would dominate a fresh map
 	// load. User opts in per-level from the Layers panel.
 	"schoolPrimary",
@@ -786,35 +661,14 @@ export const LAYER_DISPLAY_DEFS: ReadonlyArray<{
 	key: LayerKey;
 	label: string;
 	hint: string;
-	// Present only on layers that belong in a collapsible section. The
-	// commute-graph debug set is ~100 entries; left ungrouped it would bury
-	// the dozen layers people actually use day to day.
-	group?: string;
 }> = DISPLAY_ORDER.map((key) => {
 	const spec = SPEC_BY_KEY[key];
 	return {
 		key,
 		label: spec.label,
 		hint: spec.hint,
-		...(spec.kind === "commuteDebug" ? { group: spec.group } : {}),
 	};
 });
-
-// Grouped projection for the panel: [groupName, layers] in DISPLAY_ORDER,
-// preserving first-seen group order so the sections read in the same
-// sequence as the render stack.
-export const GROUPED_LAYER_DEFS: ReadonlyArray<
-	[string, ReadonlyArray<(typeof LAYER_DISPLAY_DEFS)[number]>]
-> = (() => {
-	const byGroup = new Map<string, (typeof LAYER_DISPLAY_DEFS)[number][]>();
-	for (const def of LAYER_DISPLAY_DEFS) {
-		if (!def.group) continue;
-		const bucket = byGroup.get(def.group);
-		if (bucket) bucket.push(def);
-		else byGroup.set(def.group, [def]);
-	}
-	return [...byGroup.entries()];
-})();
 
 // --- Layer factories ---------------------------------------------------------
 
@@ -956,128 +810,6 @@ const makeCommuteHullLabelLayer = (
 		background: false,
 	});
 
-// --- Commute-graph debug layer factories -------------------------------------
-//
-// All three artefacts are published per (mode, centre) with a `tier` property
-// and filtered here, so switching between tiers costs no extra network round
-// trips. Promises are memoised per (url, tier) because deck.gl compares `data`
-// by identity — handing back the same reference also skips re-parsing.
-
-type DebugFeature = {
-	type: "Feature";
-	geometry: { type: string; coordinates: unknown };
-	properties?: {
-		// MST and stop-time layers carry `tier`; hull features carry the tier
-		// under the name the published hull schema already uses. Both are
-		// accepted so one filter serves all three artefacts.
-		tier?: number;
-		transit_time_minutes_nearest_tier?: number;
-		minutes?: number;
-		STOP_NAME?: string;
-		centre_name?: string;
-		MODE?: string;
-	};
-};
-
-const featureTier = (f: DebugFeature): number | undefined =>
-	f.properties?.tier ?? f.properties?.transit_time_minutes_nearest_tier;
-
-const debugFeatureCache = new Map<string, Promise<DebugFeature[]>>();
-const getDebugFeatures = (
-	url: string,
-	tier: number | null,
-): Promise<DebugFeature[]> => {
-	const cacheKey = `${url}#${tier ?? "all"}`;
-	let p = debugFeatureCache.get(cacheKey);
-	if (!p) {
-		p = (async () => {
-			const res = await fetch(url);
-			if (!res.ok) {
-				throw new Error(`failed to fetch debug layer ${url}: ${res.status}`);
-			}
-			const fc = (await res.json()) as { features?: DebugFeature[] };
-			const all = fc.features ?? [];
-			return tier === null ? all : all.filter((f) => featureTier(f) === tier);
-		})();
-		debugFeatureCache.set(cacheKey, p);
-	}
-	return p;
-};
-
-type TimeLabel = { position: [number, number]; text: string };
-
-const makeCommuteDebugLayer = (
-	s: CommuteDebugSpec,
-	visible: boolean,
-): Layer => {
-	const url = versionedUrl(s.urlPath);
-	const data = getDebugFeatures(url, s.tier);
-
-	if (s.artefact === "times") {
-		// Cumulative minutes-from-centre, rendered as text at each stop —
-		// the on-map equivalent of the labelled nodes in the review PNGs.
-		return new TextLayer<TimeLabel>({
-			id: s.layerId,
-			data: data.then((features) =>
-				features
-					.map((f): TimeLabel | null => {
-						const c = f.geometry?.coordinates as [number, number] | undefined;
-						const m = f.properties?.minutes;
-						if (!c || typeof m !== "number") return null;
-						return { position: c, text: m.toFixed(1) };
-					})
-					.filter((x): x is TimeLabel => x !== null),
-			),
-			visible,
-			pickable: false,
-			getPosition: (d: TimeLabel) => d.position,
-			getText: (d: TimeLabel) => d.text,
-			getColor: [255, 233, 168, 255],
-			getSize: 11,
-			sizeUnits: "pixels",
-			getTextAnchor: "start",
-			getAlignmentBaseline: "center",
-			getPixelOffset: [5, -5],
-			fontFamily:
-				"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-			fontWeight: 700,
-			background: true,
-			getBackgroundColor: [17, 22, 28, 190],
-			backgroundPadding: [2, 1],
-		});
-	}
-
-	const isCentres = s.artefact === "centres";
-	return new GeoJsonLayer({
-		id: s.layerId,
-		// Cast at the deck.gl boundary: DebugFeature narrows `properties` to
-		// the fields these layers read, which GeoJSON's own types model as a
-		// looser index signature.
-		data: data.then(
-			(features) =>
-				({
-					type: "FeatureCollection",
-					features,
-				}) as unknown as GeoJSON.FeatureCollection,
-		),
-		visible,
-		pickable: false,
-		// Centres are markers, the tree is a route, the hull is a contour —
-		// one layer type covers all three by varying point/line styling.
-		filled: isCentres,
-		stroked: true,
-		pointType: "circle",
-		getPointRadius: 90,
-		pointRadiusMinPixels: isCentres ? 7 : 3,
-		getFillColor: [...s.baseColor, 220] as [number, number, number, number],
-		getLineColor: isCentres
-			? ([17, 22, 28, 255] as [number, number, number, number])
-			: ([...s.baseColor, 235] as [number, number, number, number]),
-		getLineWidth: s.artefact === "mst" ? 3 : 2,
-		lineWidthMinPixels: s.artefact === "mst" ? 2.5 : 1.5,
-	});
-};
-
 const makeLgaLayer = (
 	s: LgaSpec,
 	visible: boolean,
@@ -1114,17 +846,28 @@ const makeLgaLayer = (
 		},
 	});
 
+// Every MVT layer shares the same tile-source wiring: URL template, the
+// manifest's zoom window and bounds, the manifest gate, and lifecycle stats.
+const tileSourceProps = (
+	s: { layerId: string; dir: string },
+	manifest: LoadedManifest,
+) => ({
+	id: s.layerId,
+	data: tileUrl(s.dir, manifest.manifest.version),
+	minZoom: manifest.manifest.minZoom,
+	maxZoom: manifest.manifest.maxZoom,
+	extent: manifest.manifest.bounds,
+	fetch: makeGatedTileFetch(manifest),
+	...tileLifecycle(s.layerId),
+});
+
 const makeIsoLayer = (
 	s: IsoSpec,
 	manifest: LoadedManifest,
 	visible: boolean,
 ): Layer =>
 	new MVTLayer({
-		id: s.layerId,
-		data: tileUrl(s.dir, manifest.manifest.version),
-		minZoom: manifest.manifest.minZoom,
-		maxZoom: manifest.manifest.maxZoom,
-		extent: manifest.manifest.bounds,
+		...tileSourceProps(s, manifest),
 		visible,
 		stroked: true,
 		filled: true,
@@ -1139,8 +882,6 @@ const makeIsoLayer = (
 		getDashArray: [1, 1.5],
 		dashJustified: true,
 		extensions: [new PathStyleExtension({ dash: true })],
-		fetch: makeGatedTileFetch(manifest),
-		...tileLifecycle(s.layerId),
 	});
 
 // School-zone catchment polygons. Same MVT pipeline as isochrones —
@@ -1154,11 +895,7 @@ const makeSchoolZoneLayer = (
 	visible: boolean,
 ): Layer =>
 	new MVTLayer({
-		id: s.layerId,
-		data: tileUrl(s.dir, manifest.manifest.version),
-		minZoom: manifest.manifest.minZoom,
-		maxZoom: manifest.manifest.maxZoom,
-		extent: manifest.manifest.bounds,
+		...tileSourceProps(s, manifest),
 		visible,
 		stroked: true,
 		filled: true,
@@ -1170,8 +907,6 @@ const makeSchoolZoneLayer = (
 		getLineColor: [...s.color, 210] as [number, number, number, number],
 		getLineWidth: 1,
 		lineWidthMinPixels: 1,
-		fetch: makeGatedTileFetch(manifest),
-		...tileLifecycle(s.layerId),
 	});
 
 const makePtvLineLayer = (
@@ -1180,11 +915,7 @@ const makePtvLineLayer = (
 	visible: boolean,
 ): Layer =>
 	new MVTLayer({
-		id: s.layerId,
-		data: tileUrl(s.dir, manifest.manifest.version),
-		minZoom: manifest.manifest.minZoom,
-		maxZoom: manifest.manifest.maxZoom,
-		extent: manifest.manifest.bounds,
+		...tileSourceProps(s, manifest),
 		visible,
 		stroked: true,
 		filled: false,
@@ -1192,8 +923,6 @@ const makePtvLineLayer = (
 		getLineColor: [...s.baseColor, s.alpha] as [number, number, number, number],
 		getLineWidth: 2,
 		lineWidthMinPixels: 1.5,
-		fetch: makeGatedTileFetch(manifest),
-		...tileLifecycle(s.layerId),
 	});
 
 const makePtvStopsLayer = (
@@ -1202,11 +931,7 @@ const makePtvStopsLayer = (
 	visible: boolean,
 ): Layer =>
 	new MVTLayer({
-		id: s.layerId,
-		data: tileUrl(s.dir, manifest.manifest.version),
-		minZoom: manifest.manifest.minZoom,
-		maxZoom: manifest.manifest.maxZoom,
-		extent: manifest.manifest.bounds,
+		...tileSourceProps(s, manifest),
 		visible,
 		pickable: true,
 		pointType: "circle",
@@ -1228,8 +953,6 @@ const makePtvStopsLayer = (
 		getLineColor: [20, 20, 20, s.outlineAlpha],
 		getLineWidth: 0.5,
 		lineWidthMinPixels: 0.5,
-		fetch: makeGatedTileFetch(manifest),
-		...tileLifecycle(s.layerId),
 	});
 
 const makeSalLayer = (
@@ -1239,11 +962,7 @@ const makeSalLayer = (
 	onRegionClick: (selection: RegionSelection) => void,
 ): Layer =>
 	new MVTLayer({
-		id: s.layerId,
-		data: tileUrl(s.dir, manifest.manifest.version),
-		minZoom: manifest.manifest.minZoom,
-		maxZoom: manifest.manifest.maxZoom,
-		extent: manifest.manifest.bounds,
+		...tileSourceProps(s, manifest),
 		visible,
 		stroked: true,
 		filled: true,
@@ -1252,7 +971,6 @@ const makeSalLayer = (
 		getLineColor: [200, 200, 50, 60],
 		getLineWidth: 2,
 		lineWidthMinPixels: 1,
-		fetch: makeGatedTileFetch(manifest),
 		onClick: (info: {
 			object?: { properties?: Record<string, unknown> } | null;
 		}) => {
@@ -1271,7 +989,6 @@ const makeSalLayer = (
 				onRegionClick({ kind: "suburb", name, code });
 			}
 		},
-		...tileLifecycle(s.layerId),
 	});
 
 // --- Tile-coord debug overlay -----------------------------------------------
@@ -1543,8 +1260,6 @@ export const buildLayers = ({
 					makeCommuteHullLayer(spec, visible[spec.key]),
 					makeCommuteHullLabelLayer(spec, visible[spec.key]),
 				];
-			case "commuteDebug":
-				return [makeCommuteDebugLayer(spec, visible[spec.key])];
 			case "lga":
 				return [makeLgaLayer(spec, visible[spec.key], onRegionClick)];
 			case "iso": {

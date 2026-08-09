@@ -64,7 +64,6 @@ from etl.steps import (
     extract_school_zones,
     forecast_rental_sales,
     impute_coverage,
-    publish_commute_graph,
     publish_commute_hulls,
     publish_lga,
     publish_region_centroids,
@@ -294,28 +293,15 @@ def cmd_render_commute_hulls(args: argparse.Namespace) -> None:
         )
 
 
-def cmd_publish_commute_graph(args: argparse.Namespace) -> None:
-    publish_commute_graph.run(
-        stops_parquet=PTV_STOPS_PARQUET,
-        lines_parquet=PTV_LINES_PARQUET,
-        cache_dir=PTV_TRANSIT_TIME_CACHE,
-        mode_label=PTV_MODE_LABELS[args.mode],
-        mode_slug=args.mode,
-        centres=[compute_commute_hulls.Centre(*c) for c in COMMUTE_CENTRES],
-        tiers=COMMUTE_HULL_TIERS,
-        output_dir=PUBLIC_DATA_DIR,
-        exclude_line_pattern=PTV_REPLACEMENT_LINE_PATTERN,
-        exclude_stop_pattern=PTV_NON_STATION_STOP_PATTERN,
-        speed_band=PTV_MODE_SPEED_BAND_KMH[PTV_MODE_LABELS[args.mode]],
-    )
-
-
 def cmd_publish_commute_hulls(args: argparse.Namespace) -> None:
     publish_commute_hulls.run(
         input_geojson=_commute_hulls_source(args.mode),
         output_geojson=_commute_hulls_published(args.mode),
         keep_properties=PTV_COMMUTE_HULL_KEEP_PROPERTIES,
-        split_by_centre=True,
+        # Only the regional network has multiple centres. Splitting metro/tram
+        # too would ship a byte-identical duplicate of each combined file that
+        # no layer reads.
+        split_by_centre=args.mode == "regional_train",
     )
 
 
@@ -889,13 +875,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hulls_publish.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
     hulls_publish.set_defaults(func=cmd_publish_commute_hulls)
-
-    graph_publish = publish_sub.add_parser(
-        "commute-graph",
-        help="Publish MST + stop-time + centre debug layers for the commute graph",
-    )
-    graph_publish.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
-    graph_publish.set_defaults(func=cmd_publish_commute_graph)
 
     suburb_mappings_publish = publish_sub.add_parser(
         "suburb-mappings",

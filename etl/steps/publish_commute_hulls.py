@@ -39,10 +39,10 @@ def run(
     """Prune hull properties and publish to public/data.
 
     With ``split_by_centre``, also emits one file per centre alongside the
-    combined layer (``commute_hulls_<mode>__<centre>.geojson``). The split
-    files exist so each centre can be toggled independently while we review
-    hull geometry; the combined file stays authoritative for the merged
-    layer we return to once the shapes are settled.
+    combined layer (``commute_hulls_<mode>__<centre>.geojson``). The regional
+    network radiates from six hubs whose contours overlap heavily around
+    Melbourne, so one toggle per centre is how the layer stays readable — the
+    combined file remains the source those files are cut from.
     """
     if not input_geojson.exists():
         raise FileNotFoundError(f"Commute-hulls source not found: {input_geojson}")
