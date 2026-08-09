@@ -185,10 +185,18 @@ def _draw_network(ax: Axes, graph: NetworkGraph, budget: float) -> None:
     contour that looks wrong can be traced back to the specific hop that
     produced it.
     """
+    # Edges are filtered to the budget at draw time, not at graph-build time,
+    # so one NetworkGraph renders every tier: a 15-min view shows only the
+    # spanning tree that fits inside 15 minutes.
+    within = graph.times <= budget
     for i, j in graph.edges:
+        if not (within[i] and within[j]):
+            continue
         ex, ey = graph.edge_xy(i, j)
         ax.plot(ex, ey, color="#4b5f75", linewidth=0.6, zorder=6, solid_capstyle="round")
     for child, parent in graph.tree:
+        if not (within[child] and within[parent]):
+            continue
         ex, ey = graph.edge_xy(child, parent)
         ax.plot(
             ex,
@@ -371,18 +379,42 @@ def run(
                 source=nearest,
                 paths=edge_paths,
             )
+        centre_name = centre.name if centre else str(slug)
         written.append(
             render(
                 hulls=subset,
                 graph=graph,
                 lines=lines,
                 budget=budget,
-                title=f"{mode_label} · {centre.name if centre else slug} · 15/30/45/60 min",
+                title=f"{mode_label} · {centre_name} · 15/30/45/60 min",
                 base_color=base_color,
                 output_png=output_dir / f"hulls_{mode_slug}__{slug}.png",
                 zoom=zoom,
             )
         )
+
+        # One view per tier: a single contour with the spanning tree clipped
+        # to that same budget. Nesting four tiers in one image hides which
+        # band a given artifact belongs to; isolating them makes each
+        # contour's own input obvious, and the tighter extent gives the
+        # inner tiers a deeper, better-labelled tile grid.
+        for tier in sorted(tiers):
+            band = subset[subset["transit_time_minutes_nearest_tier"] == float(tier)]
+            if band.empty:
+                log.info("%s / %s: no %d-min hull to render", mode_label, centre_name, tier)
+                continue
+            written.append(
+                render(
+                    hulls=band,
+                    graph=graph,
+                    lines=lines,
+                    budget=float(tier),
+                    title=f"{mode_label} · {centre_name} · {tier} min only",
+                    base_color=base_color,
+                    output_png=output_dir / f"hulls_{mode_slug}__{slug}__t{tier:02d}.png",
+                    zoom=zoom,
+                )
+            )
 
     # The combined view omits the graph: overlaying six shortest-path trees
     # and every node label makes it unreadable, and per-centre files already
