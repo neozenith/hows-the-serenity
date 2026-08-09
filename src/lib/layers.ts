@@ -41,7 +41,12 @@ export const manifestUrl = (dir: string) =>
 // `tileUrl` above); the two schemes are intentionally independent.
 const COMMUTE_HULLS_TRAIN_PATH = "data/commute_hulls_metro_train.geojson";
 const COMMUTE_HULLS_TRAM_PATH = "data/commute_hulls_metro_tram.geojson";
-const COMMUTE_HULLS_REGIONAL_PATH = "data/commute_hulls_regional_train.geojson";
+// Per-centre hull files, published alongside the combined layer so each
+// centre can be reviewed in isolation while the hull geometry is being
+// corrected. `data/commute_hulls_regional_train.geojson` remains the merged
+// layer we switch back to once the shapes are settled.
+const commuteHullPath = (mode: string, centre: string) =>
+	`data/commute_hulls_${mode}__${centre}.geojson`;
 const LGA_GEOJSON_PATH = "data/selected_lga_2024_aust_gda2020.geojson";
 
 // Official PTV brand colours: Metro blue, Yarra Trams green, V/Line purple.
@@ -50,7 +55,12 @@ const LGA_GEOJSON_PATH = "data/selected_lga_2024_aust_gda2020.geojson";
 type RGB = [number, number, number];
 const TRAIN_COLOR: RGB = [31, 117, 188]; // PTV #1F75BC
 const TRAM_COLOR: RGB = [120, 190, 32]; // Yarra Trams #78BE20
-const REGIONAL_TRAIN_COLOR: RGB = [88, 44, 131]; // V/Line #582C83
+// V/Line's brand purple is #582C83, which is too dark to read as a foreground
+// contour over the dark basemap — it reads as a hole rather than a line. This
+// is that hue lifted in HSL (270deg, S55%, L62%) so it stays recognisably
+// V/Line while carrying as a stroke. Shared by the hulls, lines and stops so
+// the three regional layers keep matching, as the metro/tram pairs do.
+const REGIONAL_TRAIN_COLOR: RGB = [158, 105, 211]; // brightened V/Line #9E69D3
 
 // Commute-tier hull alpha per band — closer-to-CBD = more opaque, fades
 // outward so the boundary "recedes" with travel time. Linear ramp 50%→80%
@@ -104,9 +114,23 @@ const tileLifecycle = (layerId: string) => ({
 // plot panel and need to win z-order against every other layer (including
 // picking precedence).
 
+// One layer per (mode, centre) while hull geometry is under review — see
+// REGIONAL_HULL_CENTRES below. Splitting them means a bad contour can be
+// isolated to a single centre by toggling, instead of being buried in a
+// 24-polygon combined layer.
+type CommuteHullKey =
+	| "commuteTrain"
+	| "commuteTram"
+	| "commuteRegionalSouthernCross"
+	| "commuteRegionalGeelong"
+	| "commuteRegionalBallarat"
+	| "commuteRegionalBendigo"
+	| "commuteRegionalShepparton"
+	| "commuteRegionalTraralgon";
+
 type CommuteHullSpec = {
 	kind: "commuteHull";
-	key: "commuteTrain" | "commuteTram" | "commuteRegional";
+	key: CommuteHullKey;
 	layerId: string;
 	label: string;
 	hint: string;
@@ -237,18 +261,54 @@ export type LayerKey = LayerSpec["key"];
 // Tile-backed keys (everything except static GeoJSON layers, the
 // synthetic debug grid, and the aggregation hexagon overlay). MVT-only
 // concerns like manifest loading discriminate on this narrower type.
+// Derived from the spec types rather than listed by hand: adding another
+// static-GeoJSON or overlay layer used to require remembering to exclude its
+// key here, and forgetting meant the manifest loader would try to fetch a
+// tile manifest that doesn't exist.
 export type TileLayerKey = Exclude<
 	LayerKey,
-	| "lga"
-	| "commuteTrain"
-	| "commuteTram"
-	| "commuteRegional"
-	| "tileGrid"
-	| "rentalHex"
+	| LgaSpec["key"]
+	| CommuteHullSpec["key"]
+	| TileGridSpec["key"]
+	| HexagonSeriesSpec["key"]
 >;
 
 export type LayerVisibility = Record<LayerKey, boolean>;
 export type Manifests = Record<TileLayerKey, LoadedManifest | null>;
+
+// The six centres the regional network reaches, each published as its own
+// GeoJSON by `etl publish commute-hulls`. Kept as one table so the layer
+// key, file name and on-map label can never drift apart; collapsing these
+// back into a single combined layer is a matter of deleting this block and
+// restoring one spec pointed at commute_hulls_regional_train.geojson.
+const REGIONAL_HULL_CENTRES = [
+	{
+		key: "commuteRegionalSouthernCross",
+		slug: "southern-cross",
+		name: "Southern Cross",
+	},
+	{ key: "commuteRegionalGeelong", slug: "geelong", name: "Geelong" },
+	{ key: "commuteRegionalBallarat", slug: "ballarat", name: "Ballarat" },
+	{ key: "commuteRegionalBendigo", slug: "bendigo", name: "Bendigo" },
+	{ key: "commuteRegionalShepparton", slug: "shepparton", name: "Shepparton" },
+	{ key: "commuteRegionalTraralgon", slug: "traralgon", name: "Traralgon" },
+] as const satisfies ReadonlyArray<{
+	key: CommuteHullKey;
+	slug: string;
+	name: string;
+}>;
+
+const REGIONAL_HULL_SPECS: readonly CommuteHullSpec[] =
+	REGIONAL_HULL_CENTRES.map((c) => ({
+		kind: "commuteHull",
+		key: c.key,
+		layerId: `commute-hulls-regional-${c.slug}`,
+		label: `V/Line hulls · ${c.name}`,
+		hint: `15/30/45/60-min from ${c.name}`,
+		urlPath: commuteHullPath("regional_train", c.slug),
+		baseColor: REGIONAL_TRAIN_COLOR,
+		modeShort: "vline",
+	}));
 
 const SPECS: readonly LayerSpec[] = [
 	{
@@ -271,19 +331,7 @@ const SPECS: readonly LayerSpec[] = [
 		baseColor: TRAM_COLOR,
 		modeShort: "tram",
 	},
-	// V/Line commute hulls radiate from every centre the regional network
-	// reaches: Southern Cross plus the regional hubs (Geelong, Ballarat,
-	// Bendigo, Shepparton, Traralgon) — 6 centres x 4 tiers.
-	{
-		kind: "commuteHull",
-		key: "commuteRegional",
-		layerId: "commute-hulls-regional",
-		label: "Regional commute hulls",
-		hint: "15/30/45/60-min from Southern Cross + regional hubs",
-		urlPath: COMMUTE_HULLS_REGIONAL_PATH,
-		baseColor: REGIONAL_TRAIN_COLOR,
-		modeShort: "vline",
-	},
+	...REGIONAL_HULL_SPECS,
 	// LGA polygons — clickable for LGA-tier rental data. Drawn under SAL so
 	// when both layers are on, SAL (last in the catalogue) wins click
 	// precedence inside its smaller polygons; LGA picks up clicks that land
@@ -529,7 +577,7 @@ const DISPLAY_ORDER: readonly LayerKey[] = [
 	"regionalTrainStops",
 	"commuteTrain",
 	"commuteTram",
-	"commuteRegional",
+	...REGIONAL_HULL_CENTRES.map((c) => c.key),
 	// School-zone catchments — grouped after transit so the layer
 	// panel reads as "amenities → infrastructure → schools".
 	"schoolPrimary",

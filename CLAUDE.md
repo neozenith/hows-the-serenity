@@ -139,7 +139,7 @@ Both `tsconfig.json` and `tsconfig.app.json` declare `@/*` → `./src/*`. Both a
 - `src/lib/utils.ts` exports the `cn()` helper used by every shadcn component; do not delete it
 - Re-running `bunx --bun shadcn@latest add <name>` is safe and idempotent unless you've modified the file
 - The shadcn CLI auto-detects bun via `bun.lock` and uses `bun add` for new dependencies
-- **`shadcn` is deliberately NOT a `package.json` dependency.** Nothing in `src/` imports it — it is a CLI you invoke through `bunx --bun shadcn@latest`, which fetches it on demand. Listing it as a dependency dragged in `@modelcontextprotocol/sdk`, `ts-morph`, `cosmiconfig` and friends, which accounted for 16 of the repo's 20 high-severity audit advisories. Do not run `bun add shadcn` to "fix" a missing-module error — use `bunx`
+- **`shadcn` must stay a `package.json` dependency**, even though no TypeScript file imports it. `src/index.css` does `@import "shadcn/tailwind.css"`, so the build resolves it from `node_modules` — removing it fails `vite build` with `Can't resolve 'shadcn/tailwind.css'`. Grepping for JS/TS imports alone will wrongly suggest it is unused. Its dependency tree (`@modelcontextprotocol/sdk`, `ts-morph`, `cosmiconfig`) is the source of most of the repo's high-severity advisories; those are allowlisted with justification in `scripts/audit-gate.ts` rather than removed, because only the CSS ships to the browser — the CLI's JS is never bundled
 
 ## Biome notes
 

@@ -17,12 +17,33 @@ import geopandas as gpd
 log = logging.getLogger("etl.steps.publish_commute_hulls")
 
 
+def _write(gdf: gpd.GeoDataFrame, output_geojson: Path) -> None:
+    output_geojson.parent.mkdir(parents=True, exist_ok=True)
+    # Driver=GeoJSON, EPSG:4326 — same defaults as the rest of the pipeline.
+    gdf.to_file(output_geojson, driver="GeoJSON", engine="pyogrio")
+    log.info(
+        "Wrote %s — %.1f KB (%d features)",
+        output_geojson.name,
+        output_geojson.stat().st_size / 1024,
+        len(gdf),
+    )
+
+
 def run(
     *,
     input_geojson: Path,
     output_geojson: Path,
     keep_properties: Iterable[str],
+    split_by_centre: bool = False,
 ) -> int:
+    """Prune hull properties and publish to public/data.
+
+    With ``split_by_centre``, also emits one file per centre alongside the
+    combined layer (``commute_hulls_<mode>__<centre>.geojson``). The split
+    files exist so each centre can be toggled independently while we review
+    hull geometry; the combined file stays authoritative for the merged
+    layer we return to once the shapes are settled.
+    """
     if not input_geojson.exists():
         raise FileNotFoundError(f"Commute-hulls source not found: {input_geojson}")
 
@@ -39,13 +60,19 @@ def run(
         )
 
     pruned = gdf[[*keep, "geometry"]].copy()
-    output_geojson.parent.mkdir(parents=True, exist_ok=True)
-    log.info("Writing pruned GeoJSON -> %s", output_geojson)
-    # Driver=GeoJSON, EPSG:4326 — same defaults as the rest of the pipeline.
-    pruned.to_file(output_geojson, driver="GeoJSON", engine="pyogrio")
-    log.info(
-        "Wrote %.1f KB (%d features)",
-        output_geojson.stat().st_size / 1024,
-        len(pruned),
-    )
+    _write(pruned, output_geojson)
+
+    if split_by_centre:
+        if "centre" not in pruned.columns:
+            raise ValueError(
+                "split_by_centre requires a 'centre' property; "
+                f"available: {[c for c in pruned.columns if c != 'geometry']}"
+            )
+        stem = output_geojson.stem
+        for slug in sorted(pruned["centre"].unique()):
+            _write(
+                pruned[pruned["centre"] == slug].copy(),
+                output_geojson.with_name(f"{stem}__{slug}.geojson"),
+            )
+
     return len(pruned)

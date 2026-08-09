@@ -12,6 +12,7 @@
 .PHONY: etl-tile-sal etl-tile-iso etl-tile-ptv etl-tile-school-zones
 .PHONY: etl-forecast-bake etl-forecast-gate
 .PHONY: etl-publish etl-status etl-all etl-all-extract etl-all-publish etl-all-tile
+.PHONY: hull-preview
 .PHONY: dev-explore agentic-dev-explore build-explore test-e2e-explore
 .PHONY: port-debug port-clean agentic-port-clean
 
@@ -358,6 +359,12 @@ etl-forecast-gate: install-py ## Post-bake sMAPE breach gate (G6) — checks com
 
 etl-publish: install-py ## Publish full SAL parquet -> single GeoJSON (legacy / reference)
 	$(ETL_RUN) publish sal
+
+HULL_MODE ?= all
+HULL_ZOOM ?=
+hull-preview: install-py ## Render commute-hull review PNGs -> tmp/hull-preview/
+	$(ETL_RUN) render commute-hulls --mode $(HULL_MODE) $(if $(HULL_ZOOM),--zoom $(HULL_ZOOM))
+	@echo "PNGs in tmp/hull-preview/ — one per centre plus a combined view."
 
 etl-status: install-py ## Show pipeline artifact status
 	$(ETL_RUN) status

@@ -108,6 +108,20 @@ COMMUTE_CENTRES: tuple[tuple[str, str, float, float, bool], ...] = (
     ("traralgon", "Traralgon", 146.53890, -38.19855, False),
 )
 
+# Hull render colours, mirroring the frontend palette in src/lib/layers.ts so
+# a PNG review and the live map read as the same layer. The regional purple is
+# brightened from V/Line's brand #582C83, which is too dark to carry as a
+# foreground contour over the dark basemap.
+COMMUTE_HULL_RENDER_COLORS: dict[str, str] = {
+    "metro_train": "#1F75BC",
+    "metro_tram": "#78BE20",
+    "regional_train": "#9E69D3",
+}
+
+# Where `etl render commute-hulls` writes its PNGs. Under tmp/ because these
+# are review artefacts, regenerated on demand and never published.
+HULL_PREVIEW_DIR = PROJECT_ROOT / "tmp" / "hull-preview"
+
 # Rental + sales Excel sources, schema mapping, and outputs.
 RENTAL_SALES_INPUT_DIR = ORIGINALS_DIR / "rental_sales"
 RENTAL_SALES_SCHEMA = Path(__file__).parent / "rental_sales_schema.yaml"

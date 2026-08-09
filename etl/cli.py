@@ -21,8 +21,10 @@ from pathlib import Path
 from etl.config import (
     BOUNDARIES_ORIGINALS,
     COMMUTE_CENTRES,
+    COMMUTE_HULL_RENDER_COLORS,
     COMMUTE_HULL_TIERS,
     CONVERTED_DIR,
+    HULL_PREVIEW_DIR,
     ISOCHRONE_DURATIONS,
     ISOCHRONES_ORIGINALS,
     LGA_SIMPLIFY_TOLERANCE,
@@ -66,6 +68,7 @@ from etl.steps import (
     publish_region_names,
     publish_sal,
     publish_version,
+    render_commute_hulls,
     tile_isochrone,
     tile_ptv,
     tile_sal,
@@ -262,11 +265,31 @@ def cmd_compute_commute_hulls(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_render_commute_hulls(args: argparse.Namespace) -> None:
+    modes = PTV_MODES if args.mode == "all" else (args.mode,)
+    centres = [compute_commute_hulls.Centre(*c) for c in COMMUTE_CENTRES]
+    for mode in modes:
+        render_commute_hulls.run(
+            hulls_geojson=_commute_hulls_source(mode),
+            stops_parquet=PTV_STOPS_PARQUET,
+            lines_parquet=PTV_LINES_PARQUET,
+            cache_dir=PTV_TRANSIT_TIME_CACHE,
+            mode_label=PTV_MODE_LABELS[mode],
+            mode_slug=mode,
+            centres=centres,
+            base_color=COMMUTE_HULL_RENDER_COLORS[mode],
+            output_dir=args.output_dir,
+            zoom=args.zoom,
+            tiers=COMMUTE_HULL_TIERS,
+        )
+
+
 def cmd_publish_commute_hulls(args: argparse.Namespace) -> None:
     publish_commute_hulls.run(
         input_geojson=_commute_hulls_source(args.mode),
         output_geojson=_commute_hulls_published(args.mode),
         keep_properties=PTV_COMMUTE_HULL_KEEP_PROPERTIES,
+        split_by_centre=True,
     )
 
 
@@ -1240,6 +1263,32 @@ def build_parser() -> argparse.ArgumentParser:
     all_p.set_defaults(func=cmd_all)
 
     # `etl status`
+    # `etl render <target>` — diagnostic PNGs, not pipeline outputs.
+    render_p = top_sub.add_parser("render", help="Render review PNGs of derived geometry")
+    render_p.set_defaults(func=_help(render_p))
+    render_sub = render_p.add_subparsers(dest="render_cmd", required=False)
+
+    hulls_render = render_sub.add_parser(
+        "commute-hulls",
+        help="Render commute-hull PNGs (one per centre + combined) for visual review",
+    )
+    hulls_render.add_argument(
+        "--mode",
+        choices=[*PTV_MODES, "all"],
+        default="all",
+        help="PTV mode, or 'all' to render every mode",
+    )
+    hulls_render.add_argument(
+        "--zoom",
+        type=int,
+        default=None,
+        help="Slippy-tile zoom for the labelled grid (default: auto-fit to extent)",
+    )
+    hulls_render.add_argument(
+        "--output-dir", type=Path, default=HULL_PREVIEW_DIR, help="PNG output directory"
+    )
+    hulls_render.set_defaults(func=cmd_render_commute_hulls)
+
     status_p = top_sub.add_parser("status", help="Show current state of pipeline artifacts")
     status_p.set_defaults(func=cmd_status)
 

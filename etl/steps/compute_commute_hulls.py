@@ -31,7 +31,7 @@ import heapq
 import itertools
 import json
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,8 +39,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
-from shapely.geometry import Point
-from shapely.ops import unary_union
+from shapely.geometry import LineString, Point
+from shapely.ops import substring, unary_union
 
 log = logging.getLogger("etl.steps.compute_commute_hulls")
 
@@ -116,13 +116,14 @@ def load_stop_nodes(stops_parquet: Path, cache_dir: Path, mode_label: str) -> pd
     return nodes
 
 
-def build_edges(
+def _iter_adjacent_along_shapes(
     lines_parquet: Path, nodes: pd.DataFrame, mode_label: str
-) -> dict[tuple[int, int], float]:
-    """Edges between stops adjacent along any route shape of the mode.
+) -> Iterator[tuple[int, int, LineString, float, float]]:
+    """Yield (a, b, shape, dist_a, dist_b) for stops adjacent along a shape.
 
-    Weight = |minutes(A) - minutes(B)| — the telescoped point-to-point travel
-    time along the line, extracted from the cached radial scalars.
+    Single source of the snap-and-order logic, so edge weights and the edge
+    geometries drawn in review renders can never disagree about which stops
+    are adjacent or where they sit along the track.
     """
     lines = gpd.read_parquet(lines_parquet, columns=["MODE", "geometry"])
     lines = lines[lines["MODE"] == mode_label]
@@ -131,28 +132,60 @@ def build_edges(
 
     points = [Point(xy) for xy in zip(nodes["x"], nodes["y"], strict=True)]
     tree = shapely.STRtree(points)
-    minutes = nodes["minutes"].to_numpy()
 
-    edges: dict[tuple[int, int], float] = {}
-    part_count = 0
     for geom in lines.geometry:
         parts = geom.geoms if geom.geom_type == "MultiLineString" else [geom]
         for part in parts:
-            part_count += 1
             idx = tree.query(part, predicate="dwithin", distance=STOP_TO_LINE_TOLERANCE_DEG)
             if len(idx) < 2:
                 continue
             # Order the snapped stops by their position along the shape.
-            order = np.argsort([part.project(points[i]) for i in idx])
-            chain = [int(idx[k]) for k in order]
+            projected = {int(i): float(part.project(points[i])) for i in idx}
+            chain = sorted(projected, key=lambda i: projected[i])
             for a, b in itertools.pairwise(chain):
-                key = (a, b) if a < b else (b, a)
-                weight = abs(float(minutes[a] - minutes[b]))
-                prev = edges.get(key)
-                if prev is None or weight < prev:
-                    edges[key] = weight
-    log.info("%s: %d shape parts -> %d unique adjacency edges", mode_label, part_count, len(edges))
+                yield a, b, part, projected[a], projected[b]
+
+
+def build_edges(
+    lines_parquet: Path, nodes: pd.DataFrame, mode_label: str
+) -> dict[tuple[int, int], float]:
+    """Edges between stops adjacent along any route shape of the mode.
+
+    Weight = |minutes(A) - minutes(B)| — the telescoped point-to-point travel
+    time along the line, extracted from the cached radial scalars.
+    """
+    minutes = nodes["minutes"].to_numpy()
+    edges: dict[tuple[int, int], float] = {}
+    for a, b, _part, _da, _db in _iter_adjacent_along_shapes(lines_parquet, nodes, mode_label):
+        key = (a, b) if a < b else (b, a)
+        weight = abs(float(minutes[a] - minutes[b]))
+        prev = edges.get(key)
+        if prev is None or weight < prev:
+            edges[key] = weight
+    log.info("%s: %d unique adjacency edges", mode_label, len(edges))
     return edges
+
+
+def build_edge_paths(
+    lines_parquet: Path, nodes: pd.DataFrame, mode_label: str
+) -> dict[tuple[int, int], LineString]:
+    """Track geometry for each adjacency edge, for drawing the network.
+
+    Each edge gets the substring of the route shape actually running between
+    the two stops, so a rendered graph follows the rails rather than cutting
+    straight chords across the landscape — which on regional lines, where
+    stations are tens of kilometres apart, is a very different picture.
+    """
+    paths: dict[tuple[int, int], LineString] = {}
+    for a, b, part, da, db in _iter_adjacent_along_shapes(lines_parquet, nodes, mode_label):
+        key = (a, b) if a < b else (b, a)
+        segment = substring(part, min(da, db), max(da, db))
+        # Keep the shortest candidate: express and stopping patterns share
+        # stop pairs, and the shortest run is the one that hugs the track.
+        prev = paths.get(key)
+        if prev is None or segment.length < prev.length:
+            paths[key] = segment
+    return paths
 
 
 def add_transfer_edges(
@@ -175,8 +208,16 @@ def add_transfer_edges(
     return edges
 
 
-def dijkstra(n_nodes: int, edges: dict[tuple[int, int], float], source: int) -> np.ndarray:
-    """Single-source shortest path over the undirected weighted graph."""
+def dijkstra_with_paths(
+    n_nodes: int, edges: dict[tuple[int, int], float], source: int
+) -> tuple[np.ndarray, list[int | None]]:
+    """Shortest-path distances plus the predecessor of each node.
+
+    The predecessor array is the shortest-path tree — the actual route the
+    time field travelled out from the centre. The hull renderer draws it so a
+    reviewer can see which chain of stops produced a given contour, rather
+    than inferring it from the polygon.
+    """
     adjacency: list[list[tuple[int, float]]] = [[] for _ in range(n_nodes)]
     for (a, b), w in edges.items():
         adjacency[a].append((b, w))
@@ -184,6 +225,7 @@ def dijkstra(n_nodes: int, edges: dict[tuple[int, int], float], source: int) -> 
 
     dist = np.full(n_nodes, np.inf)
     dist[source] = 0.0
+    prev: list[int | None] = [None] * n_nodes
     heap: list[tuple[float, int]] = [(0.0, source)]
     while heap:
         d, u = heapq.heappop(heap)
@@ -193,7 +235,14 @@ def dijkstra(n_nodes: int, edges: dict[tuple[int, int], float], source: int) -> 
             nd = d + w
             if nd < dist[v]:
                 dist[v] = nd
+                prev[v] = u
                 heapq.heappush(heap, (nd, v))
+    return dist, prev
+
+
+def dijkstra(n_nodes: int, edges: dict[tuple[int, int], float], source: int) -> np.ndarray:
+    """Single-source shortest path over the undirected weighted graph."""
+    dist, _ = dijkstra_with_paths(n_nodes, edges, source)
     return dist
 
 
