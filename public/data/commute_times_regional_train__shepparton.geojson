@@ -1,0 +1,15 @@
+{
+"type": "FeatureCollection",
+"name": "commute_times_regional_train__shepparton",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "STOP_NAME": "Mooroopna Railway Station", "minutes": 5.0, "tier": 15, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.358214839999988, -36.39912828 ] } },
+{ "type": "Feature", "properties": { "STOP_NAME": "Mooroopna Station", "minutes": 5.0, "tier": 15, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.358214839999988, -36.39912828 ] } },
+{ "type": "Feature", "properties": { "STOP_NAME": "Murchison East Railway Station", "minutes": 28.0, "tier": 30, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.240635559999987, -36.61314794 ] } },
+{ "type": "Feature", "properties": { "STOP_NAME": "Murchison East Station", "minutes": 28.0, "tier": 30, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.240635559999987, -36.61314794 ] } },
+{ "type": "Feature", "properties": { "STOP_NAME": "Nagambie Railway Station", "minutes": 28.0, "tier": 30, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.16035666, -36.7854641 ] } },
+{ "type": "Feature", "properties": { "STOP_NAME": "Nagambie Station", "minutes": 28.0, "tier": 30, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.16035666, -36.7854641 ] } },
+{ "type": "Feature", "properties": { "STOP_NAME": "Shepparton Railway Station", "minutes": 0.3, "tier": 15, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.40649749, -36.38379101 ] } },
+{ "type": "Feature", "properties": { "STOP_NAME": "Shepparton Station", "minutes": 0.0, "tier": 15, "centre": "shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.405973100000011, -36.38381106 ] } }
+]
+}

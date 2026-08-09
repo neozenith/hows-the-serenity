@@ -1,0 +1,15 @@
+{
+"type": "FeatureCollection",
+"name": "commute_centres",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "centre": "southern-cross", "centre_name": "Southern Cross", "MODE": "METRO TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 144.95206, -37.81839 ] } },
+{ "type": "Feature", "properties": { "centre": "southern-cross", "centre_name": "Southern Cross", "MODE": "METRO TRAM" }, "geometry": { "type": "Point", "coordinates": [ 144.95206, -37.81839 ] } },
+{ "type": "Feature", "properties": { "centre": "southern-cross", "centre_name": "Southern Cross", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 144.95206, -37.81839 ] } },
+{ "type": "Feature", "properties": { "centre": "geelong", "centre_name": "Geelong", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 144.35499, -38.14424 ] } },
+{ "type": "Feature", "properties": { "centre": "ballarat", "centre_name": "Ballarat", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 143.85953, -37.55866 ] } },
+{ "type": "Feature", "properties": { "centre": "bendigo", "centre_name": "Bendigo", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 144.28285, -36.7656 ] } },
+{ "type": "Feature", "properties": { "centre": "shepparton", "centre_name": "Shepparton", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 145.40597, -36.38381 ] } },
+{ "type": "Feature", "properties": { "centre": "traralgon", "centre_name": "Traralgon", "MODE": "REGIONAL TRAIN" }, "geometry": { "type": "Point", "coordinates": [ 146.5389, -38.19855 ] } }
+]
+}
