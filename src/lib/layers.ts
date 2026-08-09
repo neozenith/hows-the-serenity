@@ -41,6 +41,7 @@ export const manifestUrl = (dir: string) =>
 // `tileUrl` above); the two schemes are intentionally independent.
 const COMMUTE_HULLS_TRAIN_PATH = "data/commute_hulls_metro_train.geojson";
 const COMMUTE_HULLS_TRAM_PATH = "data/commute_hulls_metro_tram.geojson";
+const COMMUTE_HULLS_REGIONAL_PATH = "data/commute_hulls_regional_train.geojson";
 const LGA_GEOJSON_PATH = "data/selected_lga_2024_aust_gda2020.geojson";
 
 // Official PTV brand colours: Metro blue, Yarra Trams green, V/Line purple.
@@ -105,7 +106,7 @@ const tileLifecycle = (layerId: string) => ({
 
 type CommuteHullSpec = {
 	kind: "commuteHull";
-	key: "commuteTrain" | "commuteTram";
+	key: "commuteTrain" | "commuteTram" | "commuteRegional";
 	layerId: string;
 	label: string;
 	hint: string;
@@ -238,7 +239,12 @@ export type LayerKey = LayerSpec["key"];
 // concerns like manifest loading discriminate on this narrower type.
 export type TileLayerKey = Exclude<
 	LayerKey,
-	"lga" | "commuteTrain" | "commuteTram" | "tileGrid" | "rentalHex"
+	| "lga"
+	| "commuteTrain"
+	| "commuteTram"
+	| "commuteRegional"
+	| "tileGrid"
+	| "rentalHex"
 >;
 
 export type LayerVisibility = Record<LayerKey, boolean>;
@@ -264,6 +270,19 @@ const SPECS: readonly LayerSpec[] = [
 		urlPath: COMMUTE_HULLS_TRAM_PATH,
 		baseColor: TRAM_COLOR,
 		modeShort: "tram",
+	},
+	// V/Line commute hulls radiate from every centre the regional network
+	// reaches: Southern Cross plus the regional hubs (Geelong, Ballarat,
+	// Bendigo, Shepparton, Traralgon) — 6 centres x 4 tiers.
+	{
+		kind: "commuteHull",
+		key: "commuteRegional",
+		layerId: "commute-hulls-regional",
+		label: "Regional commute hulls",
+		hint: "15/30/45/60-min from Southern Cross + regional hubs",
+		urlPath: COMMUTE_HULLS_REGIONAL_PATH,
+		baseColor: REGIONAL_TRAIN_COLOR,
+		modeShort: "vline",
 	},
 	// LGA polygons — clickable for LGA-tier rental data. Drawn under SAL so
 	// when both layers are on, SAL (last in the catalogue) wins click
@@ -510,6 +529,7 @@ const DISPLAY_ORDER: readonly LayerKey[] = [
 	"regionalTrainStops",
 	"commuteTrain",
 	"commuteTram",
+	"commuteRegional",
 	// School-zone catchments — grouped after transit so the layer
 	// panel reads as "amenities → infrastructure → schools".
 	"schoolPrimary",
@@ -643,6 +663,8 @@ type HullFeature = {
 	properties?: {
 		MODE?: string;
 		transit_time_minutes_nearest_tier?: number;
+		centre?: string;
+		centre_name?: string;
 	};
 };
 
@@ -670,9 +692,19 @@ const labelFromFeature = (
 	}
 	if (!anchor) return null;
 
+	// Multi-centre hulls disambiguate by prefixing the centre name (e.g.
+	// "geelong vline 30m"); Southern Cross keeps the original short form so
+	// the metro-area labels stay compact.
+	const centre = f.properties?.centre;
+	const centreName = f.properties?.centre_name;
+	const prefix =
+		centre && centre !== "southern-cross" && centreName
+			? `${centreName.toLowerCase()} `
+			: "";
+
 	return {
 		position: anchor,
-		text: `${modeShort} ${Math.round(tier)}m`,
+		text: `${prefix}${modeShort} ${Math.round(tier)}m`,
 	};
 };
 

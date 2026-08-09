@@ -74,10 +74,39 @@ PTV_LINE_KEEP_PROPERTIES = ("SHORT_NAME", "LONG_NAME", "MODE")
 # stop-table if commute-tier coloring is wanted.
 PTV_STOP_KEEP_PROPERTIES = ("STOP_ID", "STOP_NAME", "MODE")
 
-# Commute-tier hulls: pre-computed concentric polygons radiating from
-# Southern Cross at 15/30/45/60-minute commute-time bands. 4 polygons per
-# mode, ~3 KB total — too small for MVT tiling, served as static GeoJSON.
-PTV_COMMUTE_HULL_KEEP_PROPERTIES = ("MODE", "transit_time_minutes_nearest_tier")
+# Commute-tier hulls: concentric polygons at 15/30/45/60-minute commute-time
+# bands radiating from each reachable centre. Small enough (~tens of KB) that
+# MVT tiling would be overkill — served as static GeoJSON.
+PTV_COMMUTE_HULL_KEEP_PROPERTIES = (
+    "MODE",
+    "transit_time_minutes_nearest_tier",
+    "centre",
+    "centre_name",
+)
+
+# Primary datasets from the upstream isochrones project (symlinked into
+# data/originals/ptv/): statewide stops + line shapes, and the Google Maps
+# transit-minutes-to-Southern-Cross cache keyed by stop name.
+PTV_STOPS_PARQUET = PTV_ORIGINALS / "public_transport_stops.parquet"
+PTV_LINES_PARQUET = PTV_ORIGINALS / "public_transport_lines.parquet"
+PTV_TRANSIT_TIME_CACHE = PTV_ORIGINALS / "transit_time_cache"
+
+# Cumulative commute tiers (minutes) — one hull polygon per centre per tier.
+COMMUTE_HULL_TIERS = (15, 30, 45, 60)
+
+# Hull centres: (slug, display name, lon, lat, direct_times). Southern Cross
+# uses the cached minutes directly (the cache IS its distance field); the
+# regional hubs get times derived from the per-mode network graph. Centres
+# only produce hulls on networks they can snap to — the tram network doesn't
+# exist in Shepparton, so no tram hulls radiate from there.
+COMMUTE_CENTRES: tuple[tuple[str, str, float, float, bool], ...] = (
+    ("southern-cross", "Southern Cross", 144.95206, -37.81839, True),
+    ("geelong", "Geelong", 144.35499, -38.14424, False),
+    ("ballarat", "Ballarat", 143.85953, -37.55866, False),
+    ("bendigo", "Bendigo", 144.28285, -36.76560, False),
+    ("shepparton", "Shepparton", 145.40597, -36.38381, False),
+    ("traralgon", "Traralgon", 146.53890, -38.19855, False),
+)
 
 # Rental + sales Excel sources, schema mapping, and outputs.
 RENTAL_SALES_INPUT_DIR = ORIGINALS_DIR / "rental_sales"

@@ -20,6 +20,8 @@ from pathlib import Path
 
 from etl.config import (
     BOUNDARIES_ORIGINALS,
+    COMMUTE_CENTRES,
+    COMMUTE_HULL_TIERS,
     CONVERTED_DIR,
     ISOCHRONE_DURATIONS,
     ISOCHRONES_ORIGINALS,
@@ -27,11 +29,14 @@ from etl.config import (
     PTV_COMMUTE_HULL_KEEP_PROPERTIES,
     PTV_LINE_KEEP_PROPERTIES,
     PTV_LINES_GEOJSON,
+    PTV_LINES_PARQUET,
     PTV_MODE_LABELS,
     PTV_MODES,
     PTV_ORIGINALS,
     PTV_STOP_KEEP_PROPERTIES,
     PTV_STOPS_GEOJSON,
+    PTV_STOPS_PARQUET,
+    PTV_TRANSIT_TIME_CACHE,
     PUBLIC_DATA_DIR,
     RENTAL_SALES_DUCKDB,
     RENTAL_SALES_INPUT_DIR,
@@ -45,6 +50,7 @@ from etl.steps import (
     build_lga_hierarchy,
     build_sal_hierarchy,
     build_suburb_mappings,
+    compute_commute_hulls,
     extract_cpi,
     extract_isochrones,
     extract_ptv,
@@ -123,7 +129,9 @@ def _ptv_stops_tiles_dir(mode: str) -> Path:
 
 
 def _commute_hulls_source(mode: str) -> Path:
-    return PTV_ORIGINALS / f"ptv_commute_tier_hulls_{mode}.geojson"
+    # Produced by `etl extract commute-hulls` (multi-centre, whole-network);
+    # previously a metro-clipped static file symlinked under PTV_ORIGINALS.
+    return CONVERTED_DIR / f"ptv_commute_tier_hulls_{mode}.geojson"
 
 
 def _commute_hulls_published(mode: str) -> Path:
@@ -239,6 +247,18 @@ def cmd_tile_ptv_stops(args: argparse.Namespace) -> None:
         layer_name="ptv_stops",
         layer_dir=f"ptv_stops_{args.mode}",
         keep_properties=PTV_STOP_KEEP_PROPERTIES,
+    )
+
+
+def cmd_compute_commute_hulls(args: argparse.Namespace) -> None:
+    compute_commute_hulls.run(
+        stops_parquet=PTV_STOPS_PARQUET,
+        lines_parquet=PTV_LINES_PARQUET,
+        cache_dir=PTV_TRANSIT_TIME_CACHE,
+        mode_label=PTV_MODE_LABELS[args.mode],
+        centres=[compute_commute_hulls.Centre(*c) for c in COMMUTE_CENTRES],
+        tiers=COMMUTE_HULL_TIERS,
+        output_geojson=_commute_hulls_source(args.mode),
     )
 
 
@@ -397,10 +417,11 @@ PIPELINE_STEPS: tuple[tuple[str, ...], ...] = (
     ("extract", "isochrones"),
     *tuple(("extract", "ptv-lines", "--mode", m) for m in PTV_MODES),
     *tuple(("extract", "ptv-stops", "--mode", m) for m in PTV_MODES),
+    *tuple(("extract", "commute-hulls", "--mode", m) for m in PTV_MODES),
     # --- publish phase ---
     ("publish", "sal"),
     ("publish", "lga"),
-    *tuple(("publish", "commute-hulls", "--mode", m) for m in ("metro_train", "metro_tram")),
+    *tuple(("publish", "commute-hulls", "--mode", m) for m in PTV_MODES),
     ("publish", "suburb-mappings"),
     ("publish", "region-h3-cells"),
     ("publish", "region-names"),
@@ -774,6 +795,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode", choices=PTV_MODES, default="metro_train", help="PTV mode"
     )
     ptv_stops_extract.set_defaults(func=cmd_extract_ptv_stops)
+
+    hulls_extract = extract_sub.add_parser(
+        "commute-hulls",
+        help=(
+            "Compute multi-centre commute-tier hulls from the cached "
+            "transit-time network graph (one GeoJSON per mode)"
+        ),
+    )
+    hulls_extract.add_argument("--mode", choices=PTV_MODES, default="metro_train", help="PTV mode")
+    hulls_extract.set_defaults(func=cmd_compute_commute_hulls)
 
     # `etl publish <source>`
     publish_p = top_sub.add_parser("publish", help="Publish intermediate to public/data GeoJSON")
