@@ -34,7 +34,7 @@ Two jobs: `build` always runs; `deploy-pages` only runs on push to `main`.
 1. `actions/checkout@v6` — pull the source
 2. `oven-sh/setup-bun@v2` — install bun
 3. `bun install --frozen-lockfile` — reproducible install
-4. `bun audit --audit-level=high` — fail on new high+ severity advisories
+4. `bun run scripts/audit-gate.ts` — fail on new high+ severity advisories (wraps `bun audit --json`; allowlist with written justifications lives in the script for advisories with no patched release)
 5. `bunx --bun biome ci .` — lint + format check (no auto-fix; CI mode)
 6. `bun run build` — `tsc -b && vite build` (uses default `base: "/"`)
 7. `bun run test --run --passWithNoTests` — Vitest single-pass
@@ -74,7 +74,7 @@ Pinned to current major versions as of 2026-04. Bump majors during routine maint
 
 ### Why these specific choices
 
-- **`bun audit --audit-level=high`** — queries the npm advisory database; fails the run on high+ vulnerabilities so they're surfaced at PR time, not at deploy time
+- **`scripts/audit-gate.ts`** — queries the npm advisory database via `bun audit --json`; fails the run on high+ vulnerabilities so they're surfaced at PR time, not at deploy time. A GHSA-keyed allowlist (each entry justified in the script) exists because `bun audit --ignore` only matches CVE ids, which some advisories lack
 - **`biome ci`, not `biome check --write`** — CI mode is read-only and produces structured error output. `--write` would mutate files in CI, which is wrong
 - **`bun install --frozen-lockfile`** — fails the build if `bun.lock` is out of sync with `package.json` (the bun analog of `npm ci`)
 - **`bun run test --run --passWithNoTests`** — Vitest defaults to watch mode; `--run` forces single-pass. `--passWithNoTests` keeps CI green when there are no test files yet

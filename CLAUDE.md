@@ -14,7 +14,7 @@ A single-page Vite + React + TypeScript application with Tailwind CSS v4, shadcn
 - **Styling**: Tailwind CSS v4 via `@tailwindcss/vite` (no `tailwind.config.*`; configuration lives in `src/index.css`)
 - **UI primitives**: shadcn/ui — components live in `src/components/ui/` and are owned, not imported from a package
 - **Lint + format**: Biome (`biome.json`); replaces ESLint and Prettier
-- **Audit**: `bun audit --audit-level=high` runs as part of `make lint`
+- **Audit**: `scripts/audit-gate.ts` (strict `bun audit` wrapper with justified GHSA allowlist) runs as part of `make lint`
 - **Unit tests**: Vitest + jsdom + Testing Library (scoped to `src/**/*.{test,spec}.{ts,tsx}`)
 - **E2e tests**: Playwright (`e2e/*.spec.ts`); see "E2e testing pattern" below
 - **Path alias**: `@/*` → `src/*` (declared in both `tsconfig.json` and `tsconfig.app.json`)
@@ -61,10 +61,10 @@ If `fix` couldn't autofix something, `ci`'s `lint` step catches it. Clean signal
 |--------|---------|
 | `make install` | `bun install` — idempotent, gated by a `node_modules/.bun_deps` sentinel file |
 | `make dev` | Vite dev server on **port 5173** (human profile) |
-| `make agentic-dev` | Vite dev server on **port 5174** (AI agent profile) |
+| `make agentic-dev` | Vite dev server on **port 5474** (AI agent profile) |
 | `make build` | Production build (`tsc -b && vite build`) → `dist/` |
 | `make preview` | Preview the built bundle |
-| `make audit` | `bun audit --audit-level=high` |
+| `make audit` | `bun run scripts/audit-gate.ts` (strict high+ gate, justified allowlist in-script) |
 | `make format` | Biome `format --write` (autofix whitespace) |
 | `make format-check` | Biome `format` read-only — fails if anything would be reformatted |
 | `make lint` | `biome ci` + `bun audit` (read-only; **fails on warnings/info too**, not just errors) |
@@ -74,12 +74,12 @@ If `fix` couldn't autofix something, `ci`'s `lint` step catches it. Clean signal
 | `make test` | Vitest single-pass with `--passWithNoTests` |
 | `make test-watch` | Vitest watch mode |
 | `make test-ui` | `@vitest/ui` dashboard |
-| `make test-e2e` | Playwright e2e (auto-starts dev server on port 5174) |
+| `make test-e2e` | Playwright e2e (auto-starts dev server on port 5474) |
 | `make test-e2e-ui` | Playwright interactive UI mode |
 | `make ci` | Strict gate: `audit → build → format-check → typecheck → lint → test → test-e2e` |
-| `make port-debug` | Show what's bound to ports 5173 / 5174 |
+| `make port-debug` | Show what's bound to ports 5173 / 5474 |
 | `make port-clean` | Kill the human-port (5173) holder |
-| `make agentic-port-clean` | Kill the agentic-port (5174) holder |
+| `make agentic-port-clean` | Kill the agentic-port (5474) holder |
 | `make clean` | Remove all build outputs, test artifacts, and `node_modules/` |
 
 Add a shadcn component (no make target — invoke directly):
@@ -90,9 +90,9 @@ bunx --bun shadcn@latest add <name>
 
 ### Why `dev` and `agentic-dev` are split
 
-The two targets bind different ports (5173 vs 5174) so a human running `make dev` and an AI agent running `make agentic-dev` can both develop simultaneously without port collisions. `port-clean` and `agentic-port-clean` are likewise split — each role only kills its own port. Both servers use `--strictPort` so a misconfigured collision fails loudly instead of silently picking the next free port.
+The two targets bind different ports (5173 vs 5474) so a human running `make dev` and an AI agent running `make agentic-dev` can both develop simultaneously without port collisions. `port-clean` and `agentic-port-clean` are likewise split — each role only kills its own port. Both servers use `--strictPort` so a misconfigured collision fails loudly instead of silently picking the next free port.
 
-Playwright's `webServer` is configured to use the **agentic port (5174)** so a human can keep `make dev` running on 5173 while `make test-e2e` runs in parallel.
+Playwright's `webServer` is configured to use the **agentic port (5474)** so a human can keep `make dev` running on 5173 while `make test-e2e` runs in parallel.
 
 Always run from the project root — never `cd` into subdirectories. If you need to run a one-off bun command, use `bun --cwd <subdir>`, not `cd <subdir> && bun ...`.
 
@@ -118,7 +118,7 @@ To add a route to the smoke suite: append `{ id, slug, name, path }` to `SECTION
 - **Use `bun add` / `bun add -d`, never `npm install` or `npx install`** — they produce a different lockfile and break `bun install`'s integrity check.
 - **`bunx --bun <pkg>`** forces the wrapped CLI to run on bun's runtime instead of node. Use it for shadcn (`bunx --bun shadcn@latest add ...`), tsc (`bunx --bun tsc -b`), Biome (`bunx --bun biome check`), and Playwright (`bunx --bun playwright install`).
 - **`bun.lock`** is bun's text lockfile (Bun ≥ 1.2). Commit it. Never recreate from scratch — let `bun add` / `bun install` update it incrementally.
-- **`bun audit --audit-level=high`** is the canonical security check; it queries the npm advisory database. Wired into `make lint` so CI fails on new high+ severity vulnerabilities.
+- **`bun run scripts/audit-gate.ts`** is the canonical security check; it wraps `bun audit --json` (npm advisory database) and fails on any non-allowlisted high+ advisory. Allowlist entries require a written justification in the script. Wired into `make lint` so CI fails on new high+ severity vulnerabilities.
 
 ## Path aliases
 
@@ -139,6 +139,7 @@ Both `tsconfig.json` and `tsconfig.app.json` declare `@/*` → `./src/*`. Both a
 - `src/lib/utils.ts` exports the `cn()` helper used by every shadcn component; do not delete it
 - Re-running `bunx --bun shadcn@latest add <name>` is safe and idempotent unless you've modified the file
 - The shadcn CLI auto-detects bun via `bun.lock` and uses `bun add` for new dependencies
+- **`shadcn` is deliberately NOT a `package.json` dependency.** Nothing in `src/` imports it — it is a CLI you invoke through `bunx --bun shadcn@latest`, which fetches it on demand. Listing it as a dependency dragged in `@modelcontextprotocol/sdk`, `ts-morph`, `cosmiconfig` and friends, which accounted for 16 of the repo's 20 high-severity audit advisories. Do not run `bun add shadcn` to "fix" a missing-module error — use `bunx`
 
 ## Biome notes
 

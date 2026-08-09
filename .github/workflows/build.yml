@@ -55,7 +55,9 @@ jobs:
         run: uv sync --frozen
 
       - name: Audit dependencies
-        run: bun audit --audit-level=high
+        # Strict high+ gate with a justified allowlist for advisories that
+        # have no patched release — see scripts/audit-gate.ts.
+        run: bun run scripts/audit-gate.ts
 
       - name: Lint & format check (TypeScript)
         run: bunx --bun biome ci .

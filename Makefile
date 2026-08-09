@@ -82,8 +82,8 @@ preview: install-ts ## Preview the built bundle locally
 
 audit: audit-ts audit-py ## Audit all dependencies (high+ severity only)
 
-audit-ts: install-ts ## Audit TypeScript deps via bun audit
-	bun audit --audit-level=high
+audit-ts: install-ts ## Audit TypeScript deps via bun audit (allowlist in scripts/audit-gate.ts)
+	bun run scripts/audit-gate.ts
 
 audit-py: install-py ## Audit Python deps (placeholder — uv pip audit is preview-only)
 	@echo "audit-py: skipped (uv has no stable audit subcommand yet)"
@@ -142,14 +142,22 @@ test-watch: install-ts ## Vitest in watch mode
 test-ui: install-ts ## Vitest @vitest/ui dashboard
 	bun run test:ui
 
+# Every e2e target forwards AGENTIC_DEV_PORT as PLAYWRIGHT_PORT so the
+# Makefile stays the single source of truth for the port. Without this,
+# playwright.config.ts falls back to its own default and can bind a
+# different port than `agentic-port-clean` cleans — and because
+# `reuseExistingServer` is on locally, Playwright will happily reuse an
+# unrelated project's dev server squatting there and run the whole suite
+# against the wrong app.
 test-e2e: install-ts ## Playwright e2e (auto-starts dev server on agentic port)
-	bun run test:e2e
+	PLAYWRIGHT_PORT=$(AGENTIC_DEV_PORT) bun run test:e2e
 
 test-e2e-ui: install-ts ## Playwright in interactive UI mode
-	bun run test:e2e -- --ui
+	PLAYWRIGHT_PORT=$(AGENTIC_DEV_PORT) bun run test:e2e -- --ui
 
 test-e2e-explore: install-ts ## Playwright e2e against the Explorer SPA (flag on)
-	VITE_ENABLE_EXPLORE=true bun run test:e2e -- e2e/explorer.spec.ts
+	VITE_ENABLE_EXPLORE=true PLAYWRIGHT_PORT=$(AGENTIC_DEV_PORT) \
+		bun run test:e2e -- e2e/explorer.spec.ts
 
 # Post-deploy verification — runs e2e/prod-smoke.spec.ts against the
 # live Pages deploy (or any URL via PLAYWRIGHT_BASE_URL env override).

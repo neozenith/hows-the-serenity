@@ -33,9 +33,14 @@ const PALETTE: ReadonlyArray<string> = [
 	"#FECB52",
 ];
 
+// Literal fallback (= PALETTE[0]) keeps noUncheckedIndexedAccess satisfied
+// without a non-null assertion — the modulo index is always in range, so the
+// fallback is unreachable in practice.
+const FALLBACK_COLOR = "#636EFA";
+
 export const colorForIndex = (i: number): string =>
 	PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length] ??
-	PALETTE[0]!;
+	FALLBACK_COLOR;
 
 // "#RRGGBB" → "rgba(R, G, B, a)" so band fills can share their series's hue
 // at a low alpha without parsing colours at the call site.

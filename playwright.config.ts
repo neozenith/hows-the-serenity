@@ -4,11 +4,12 @@ import { defineConfig, devices } from "@playwright/test";
  * Playwright config for the project's e2e suite.
  *
  * The dev server is started by Playwright's `webServer` block on the agentic
- * port (5174) so a human running `make dev` on 5173 can keep working while
+ * port (5474, AGENTIC_DEV_PORT — forwarded as PLAYWRIGHT_PORT by the
+ * Makefile) so a human running `make dev` on 5173 can keep working while
  * `make test-e2e` runs in parallel without port collisions.
  */
 
-const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 5174);
+const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 5474);
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 // When pointed at a remote URL (e.g. the live Pages deploy for
 // post-deploy verification), skip the dev-server bootstrap — there's no
@@ -33,6 +34,9 @@ export default defineConfig({
 	workers: process.env.CI ? 1 : undefined,
 	reporter: [["list"], ["html", { open: "never" }]],
 	outputDir: "test-results",
+	// Guards against `reuseExistingServer` adopting an unrelated project's
+	// dev server on this port — see e2e/global-setup.ts.
+	globalSetup: "./e2e/global-setup.ts",
 	use: {
 		baseURL: BASE_URL,
 		trace: "retain-on-failure",
