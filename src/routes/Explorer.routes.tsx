@@ -20,7 +20,10 @@ import {
 } from "@/components/explorer/RegionExplorer";
 import { Explorer } from "./Explorer";
 
-const DEFAULT_LANDING = `lga/${DEFAULT_LGA_ID}`;
+// Absolute targets (still basename-relative): React Router v7 resolves
+// relative paths inside a splat (`*`) route against the full URL, so a
+// relative redirect from the catch-all would keep matching itself.
+const DEFAULT_LANDING = `/explore/lga/${DEFAULT_LGA_ID}`;
 
 export const ExplorerTree = () => (
 	<Routes>
@@ -29,10 +32,10 @@ export const ExplorerTree = () => (
 			<Route path="sal/:id" element={<RegionExplorer kind="suburb" />} />
 			<Route path="lga/:id" element={<RegionExplorer kind="lga" />} />
 			<Route path="dendrogram/:tier" element={<DendrogramExplorer />} />
-			{/* `to="sal"` is relative to this route's URL (/explore/dendrogram),
-				so it resolves to /explore/dendrogram/sal. An absolute path
-				or "dendrogram/sal" would double-prefix the path segment. */}
-			<Route path="dendrogram" element={<Navigate to="sal" replace />} />
+			<Route
+				path="dendrogram"
+				element={<Navigate to="/explore/dendrogram/sal" replace />}
+			/>
 			<Route index element={<Navigate to={DEFAULT_LANDING} replace />} />
 			<Route path="*" element={<Navigate to={DEFAULT_LANDING} replace />} />
 		</Route>
