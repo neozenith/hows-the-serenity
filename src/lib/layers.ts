@@ -969,8 +969,10 @@ const makeSalLayer = (
 		pickable: true,
 		getFillColor: [200, 200, 50, 13], // 13/255 ≈ 5%
 		getLineColor: [200, 200, 50, 60],
-		getLineWidth: 2,
-		lineWidthMinPixels: 1,
+		// Matches the commute-hull stroke (makeCommuteHullLayer) so the two
+		// boundary families read at the same weight.
+		getLineWidth: 4,
+		lineWidthMinPixels: 3,
 		onClick: (info: {
 			object?: { properties?: Record<string, unknown> } | null;
 		}) => {
