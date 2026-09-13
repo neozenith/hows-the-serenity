@@ -27,6 +27,7 @@ import { useMemo } from "react";
 import { Map as BaseMap } from "react-map-gl/maplibre";
 
 import type { RegionTier } from "@/lib/overview-summary";
+import "@/lib/maplibre-worker";
 import { polygonHoverLabel } from "@/lib/polygon-tooltip";
 
 // CartoDB dark-matter — matches the App.tsx basemap so the overview

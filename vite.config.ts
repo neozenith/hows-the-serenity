@@ -48,6 +48,18 @@ export default defineConfig({
 	define: {
 		global: "globalThis",
 	},
+	// MapLibre 6 ships native ESM whose chunks import each other by relative
+	// path. Prebundling rewrites the entry into node_modules/.vite/deps/ and
+	// Vite warns about the missing sibling worker. Serve the package unbundled;
+	// it has no bare imports to resolve. src/lib/maplibre-worker.ts sets the
+	// worker URL itself, so dev and build both load the same worker chunk.
+	optimizeDeps: {
+		exclude: ["maplibre-gl"],
+	},
+	// The worker chunk is ESM, and MapLibre starts it as `{type: "module"}`.
+	worker: {
+		format: "es",
+	},
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),

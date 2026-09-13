@@ -18,6 +18,7 @@ import { useLatestRentalSeries } from "@/hooks/useLatestRentalSeries";
 import { useLayerVisibility } from "@/hooks/useLayerVisibility";
 import { useRegionH3Cells } from "@/hooks/useRegionH3Cells";
 import { useRegionNames } from "@/hooks/useRegionNames";
+import "@/lib/maplibre-worker";
 import { useRegionSelection } from "@/hooks/useRegionSelection";
 import { useSuburbMappings } from "@/hooks/useSuburbMappings";
 import { useTileManifests } from "@/hooks/useTileManifests";
