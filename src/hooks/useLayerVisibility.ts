@@ -4,6 +4,13 @@ import {
 	type LayerKey,
 	type LayerVisibility,
 } from "@/lib/layers";
+import {
+	formatLayers,
+	LAYERS_PARAM,
+	parseLayers,
+	readParam,
+	writeParams,
+} from "@/lib/map-url-state";
 
 // SessionStorage persistence for layer visibility. SessionStorage (not local)
 // is deliberate: each tab keeps its own state — so two browser windows can
@@ -52,14 +59,20 @@ const writeStored = (state: LayerVisibility): void => {
 export const useLayerVisibility = () => {
 	// Lazy initialiser: function form runs once on mount, so we read storage
 	// exactly once rather than on every re-render.
-	const [visible, setVisible] = useState<LayerVisibility>(() =>
-		readStored(INITIAL_VISIBILITY),
+	// A shared link's `?l=` wins over this tab's stored layout: the recipient
+	// must see the sender's view.
+	const [visible, setVisible] = useState<LayerVisibility>(
+		() =>
+			parseLayers(readParam(LAYERS_PARAM), INITIAL_VISIBILITY) ??
+			readStored(INITIAL_VISIBILITY),
 	);
 
 	// Persist on every state change. Effect (not callback) means *any* future
 	// mutator — reset, load-preset, undo/redo — gets persistence for free.
+	// Mirrored into the URL so the address bar is always a shareable link.
 	useEffect(() => {
 		writeStored(visible);
+		writeParams({ [LAYERS_PARAM]: formatLayers(visible) });
 	}, [visible]);
 
 	const toggle = useCallback((key: LayerKey) => {

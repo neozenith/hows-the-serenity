@@ -131,7 +131,10 @@ export const useSourceFilter = (): readonly [
 	const [searchParams, setSearchParams] = useSearchParams();
 	const filter = parseSourceFilter(searchParams.get(SOURCE_FILTER_PARAM));
 	const setFilter = (next: SourceFilter) => {
-		const sp = new URLSearchParams(searchParams);
+		// Start from the live address bar, not the router's snapshot: the map
+		// writes `?v=`/`?l=` via history.replaceState, which the router never
+		// sees, so its `searchParams` would clobber the shareable view state.
+		const sp = new URLSearchParams(window.location.search);
 		// Default value is omitted from the URL so a canonical link stays
 		// clean. Only non-default values round-trip through `?sources=`.
 		if (next === DEFAULT_SOURCE_FILTER) {

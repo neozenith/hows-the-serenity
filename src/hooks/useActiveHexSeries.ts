@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { HEX_SERIES_PARAM, readParam, writeParams } from "@/lib/map-url-state";
 import { RENTAL_HEX_SERIES_BY_ID } from "@/lib/rental-hex-series";
 
 // Persistent selection of which rental/sales series feeds the HexagonLayer.
@@ -37,10 +38,18 @@ const writeStored = (id: string | null): void => {
 };
 
 export const useActiveHexSeries = () => {
-	const [activeId, setActiveId] = useState<string | null>(() => readStored());
+	// A shared link's `?hex=` wins over this tab's stored choice; an unknown
+	// id is ignored like a stale stored one.
+	const [activeId, setActiveId] = useState<string | null>(() => {
+		const fromUrl = readParam(HEX_SERIES_PARAM);
+		return fromUrl && RENTAL_HEX_SERIES_BY_ID.has(fromUrl)
+			? fromUrl
+			: readStored();
+	});
 
 	useEffect(() => {
 		writeStored(activeId);
+		writeParams({ [HEX_SERIES_PARAM]: activeId });
 	}, [activeId]);
 
 	const select = useCallback((id: string | null) => {

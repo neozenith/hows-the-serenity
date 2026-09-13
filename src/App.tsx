@@ -22,6 +22,14 @@ import { useRegionSelection } from "@/hooks/useRegionSelection";
 import { useSuburbMappings } from "@/hooks/useSuburbMappings";
 import { useTileManifests } from "@/hooks/useTileManifests";
 import { buildLayers, pickToTooltip } from "@/lib/layers";
+import {
+	formatView,
+	HEX_3D_PARAM,
+	parseView,
+	readParam,
+	VIEW_PARAM,
+	writeParams,
+} from "@/lib/map-url-state";
 // Side-effect import: installs the read-only `__htsTileCount` accessor on
 // `window` at module load. The companion `__htsSelectRegion` write-hook is
 // installed inside `useRegionSelection`, where it can capture the React
@@ -59,6 +67,10 @@ const TILTED_PITCH = 60;
 const formatBearing = (bearing: number): string =>
 	`b ${Math.round(((bearing % 360) + 360) % 360)}°`;
 const formatPitch = (pitch: number): string => `p ${Math.round(pitch)}°`;
+
+// Trailing debounce for camera → URL writes. onViewStateChange fires every
+// frame, and Safari throws once replaceState exceeds ~100 calls per 30 s.
+const VIEW_URL_DEBOUNCE_MS = 250;
 
 const App = () => {
 	const status = useDuckDb();
@@ -98,6 +110,10 @@ const App = () => {
 	// in sessionStorage so a refresh keeps the user's preference within a
 	// tab. Same pattern as useActiveHexSeries / useLayerVisibility.
 	const [hex3D, setHex3D] = useState<boolean>(() => {
+		// A shared link's `?3d=` wins over the stored preference. The param is
+		// only ever written as "1", so any other value reads as off.
+		const fromUrl = readParam(HEX_3D_PARAM);
+		if (fromUrl !== null) return fromUrl === "1";
 		try {
 			return window.sessionStorage.getItem("hts:hex-3d:v1") === "true";
 		} catch {
@@ -110,6 +126,7 @@ const App = () => {
 		} catch (e) {
 			console.warn("hex-3d: sessionStorage write failed", e);
 		}
+		writeParams({ [HEX_3D_PARAM]: hex3D ? "1" : null });
 	}, [hex3D]);
 	const activeSeriesValues = activeHexSeriesId
 		? (hexSeriesValues.get(activeHexSeriesId) ?? null)
@@ -133,10 +150,13 @@ const App = () => {
 	// Honour persisted hex3D on first paint so the camera doesn't snap from
 	// top-down to tilt during mount. The lazy initializer runs after hex3D's
 	// own lazy initializer (declared above), so `hex3D` is already correct.
-	const [viewSeed, setViewSeed] = useState<MapViewState>(() => ({
-		...INITIAL_VIEW_STATE,
-		pitch: hex3D ? TILTED_PITCH : 0,
-	}));
+	// A shared link's `?v=` camera wins; its pitch is taken verbatim so the
+	// recipient sees the exact tilt the sender had.
+	const [viewSeed, setViewSeed] = useState<MapViewState>(() => {
+		const fromUrl = parseView(readParam(VIEW_PARAM));
+		if (fromUrl) return { ...INITIAL_VIEW_STATE, ...fromUrl };
+		return { ...INITIAL_VIEW_STATE, pitch: hex3D ? TILTED_PITCH : 0 };
+	});
 	// Mirror hex3D into a ref so the locate-me effect can read the latest
 	// value without listing hex3D as a dep — otherwise a 3D toggle would
 	// re-fire locate-me with the last known geoState and teleport the user.
@@ -177,17 +197,28 @@ const App = () => {
 	// tilt toggle preserves the user's pan/zoom instead of teleporting back
 	// to INITIAL_VIEW_STATE. Updated by onViewStateChange alongside the label
 	// refs, same imperative pattern.
-	const viewStateRef = useRef<MapViewState>(INITIAL_VIEW_STATE);
+	const viewStateRef = useRef<MapViewState>(viewSeed);
+
+	// Camera → URL. Written once on mount (so the address bar is shareable
+	// before the user moves) and then debounced from onViewStateChange.
+	const viewUrlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => {
+		writeParams({ [VIEW_PARAM]: formatView(viewStateRef.current) });
+		return () => {
+			if (viewUrlTimerRef.current) clearTimeout(viewUrlTimerRef.current);
+		};
+	}, []);
 
 	// Animate the camera tilt on hex3D toggle. The first-mount tilt is
 	// already baked into viewSeed's lazy initializer, so we skip the initial
 	// effect run — otherwise we'd schedule a redundant transition on mount.
-	const skipFirstHex3DTransitionRef = useRef(true);
+	// Compare against the last applied value rather than a "first run" flag:
+	// StrictMode runs effects twice on mount, and a flag would let the second
+	// run flatten a shared link's pitch/bearing back to top-down.
+	const appliedHex3DRef = useRef(hex3D);
 	useEffect(() => {
-		if (skipFirstHex3DTransitionRef.current) {
-			skipFirstHex3DTransitionRef.current = false;
-			return;
-		}
+		if (appliedHex3DRef.current === hex3D) return;
+		appliedHex3DRef.current = hex3D;
 		const snap = viewStateRef.current;
 		setViewSeed({
 			longitude: snap.longitude,
@@ -306,6 +337,10 @@ const App = () => {
 					// we know it's MapView here so a narrow cast is safe.
 					const vs = params.viewState as MapViewState;
 					viewStateRef.current = vs;
+					if (viewUrlTimerRef.current) clearTimeout(viewUrlTimerRef.current);
+					viewUrlTimerRef.current = setTimeout(() => {
+						writeParams({ [VIEW_PARAM]: formatView(viewStateRef.current) });
+					}, VIEW_URL_DEBOUNCE_MS);
 					if (zoomLabelRef.current && typeof vs.zoom === "number") {
 						zoomLabelRef.current.textContent = `z ${vs.zoom.toFixed(1)}`;
 					}
@@ -331,9 +366,9 @@ const App = () => {
 				zoomLabelRef={zoomLabelRef}
 				pitchLabelRef={pitchLabelRef}
 				bearingLabelRef={bearingLabelRef}
-				initialZoom={INITIAL_VIEW_STATE.zoom}
-				initialPitch={hex3D ? TILTED_PITCH : (INITIAL_VIEW_STATE.pitch ?? 0)}
-				initialBearing={INITIAL_VIEW_STATE.bearing ?? 0}
+				initialZoom={viewSeed.zoom}
+				initialPitch={viewSeed.pitch ?? 0}
+				initialBearing={viewSeed.bearing ?? 0}
 				geoState={geoState}
 				onLocateMe={locate}
 			/>
