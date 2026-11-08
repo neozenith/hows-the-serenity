@@ -249,6 +249,18 @@ subcommands.
 
 ---
 
+## Ticketing vocabulary (from `TICKETING.md`)
+
+| Term | Definition |
+|---|---|
+| **GH Issue** | One GitHub Issue; the repo's unit of tracked work. |
+| **HTS-{n}** | Work reference for GH Issue `#n`, used in branch, worktree and PR names. |
+| **canonical GH Issue** | The earliest GH Issue for a piece of work; later duplicates close into it. |
+| **demand** | A GH Issue's duplicate count plus its total reactions. |
+| **ready** | A GH Issue whose every `blocked by` GH Issue is CLOSED. |
+
+---
+
 ## Phrases the user actually uses (verbatim, from session logs)
 
 These are surfaced unedited so future code search lands on the user's
