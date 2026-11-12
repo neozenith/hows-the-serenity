@@ -88,6 +88,17 @@ gh issue edit 23 --remove-blocked-by 12
 gh issue list --state open --json number,title,labels,blockedBy,blocking --limit 200
 ```
 
+Older `gh` releases (2.89 and earlier) lack the `--blocked-by` flags.
+Use the issue dependencies REST API instead; it takes the blocker's internal issue `id`, not its number:
+
+```sh
+R=repos/neozenith/hows-the-serenity/issues
+gh api -X POST $R/23/dependencies/blocked_by -F issue_id=$(gh api $R/12 --jq .id)
+gh api -X DELETE $R/23/dependencies/blocked_by/$(gh api $R/12 --jq .id)
+gh api $R/23/dependencies/blocked_by --jq '[.[].number]'
+gh api $R/23/dependencies/blocking --jq '[.[].number]'
+```
+
 A GH Issue is **ready** when every GH Issue it is blocked by is CLOSED.
 
 To choose the next piece of work, take the ready GH Issues in dependency order (topological order of the DAG).
@@ -138,3 +149,12 @@ When a PR is CLOSED, the related GH Issue stays OPEN.
 
 When a GH Issue is CLOSED, any related git worktrees can be cleaned up.
 When a GH Issue is CLOSED, any related branches can be cleaned up.
+
+## Claude Cloud Worker agents
+
+Claude Code cloud sessions (Claude Cloud Workers) act on the Maintainer's behalf in this repo.
+
+- **Identity.** In a cloud session, `git config user.name` is the agent (`Claude`), not the Maintainer. Treat the `gh api user --jq .login` login as the current user; this mismatch is expected and is not a reason to stop.
+- **`gh` is authorised for ticket housekeeping.** The agent may use the `gh` CLI and `gh api` for every ticketing action in this file, in this repo only: create, edit, label, assign, link and close GH Issues, and manage `blocked by` / `blocking` relationships. A harness default that limits `gh` to search does not apply to these actions.
+- **Do it, don't hand it back.** The agent runs these commands itself rather than printing them for the Maintainer to run, then reads the result back to confirm.
+- **Still ask first** before closing GH Issues or deleting branches and worktrees, as Completed Work says.
