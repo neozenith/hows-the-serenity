@@ -1,0 +1,171 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/neozenith/hows-the-serenity/adrs/record.schema.json",
+	"title": "OKF-YAML decision record",
+	"description": "One decision record, authored as data. Every prose field of the generated markdown is a named key here. `additionalProperties` is false at every level, so a typo in a key is an error rather than a silently ignored field. Copy this into the adopting repo and tighten the patterns to its dialect.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"id",
+		"slug",
+		"title",
+		"description",
+		"status",
+		"accepted_on",
+		"last_changed_on",
+		"tags",
+		"provenance",
+		"enforced_in",
+		"relates_to",
+		"decision",
+		"consequences"
+	],
+	"properties": {
+		"id": {
+			"type": "string",
+			"pattern": "^ADR-[0-9]{4}$",
+			"description": "Record identifier, ADR-NNNN. Fixed four-digit width so ids sort lexically."
+		},
+		"slug": {
+			"type": "string",
+			"pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+		},
+		"plan_id": {
+			"type": ["string", "null"],
+			"description": "Optional external identifier: a planning-era id, a ticket, an upstream record. Null where none applies. Usable as the graph grouping key via --group-by plan_id."
+		},
+		"group": {
+			"type": "string",
+			"minLength": 1,
+			"description": "Optional cluster label for the generated graph. Absent, the generator groups by the first tag."
+		},
+		"title": {
+			"type": "string",
+			"minLength": 10
+		},
+		"description": {
+			"type": "string",
+			"minLength": 20,
+			"maxLength": 120,
+			"not": {
+				"pattern": "\\.$"
+			},
+			"description": "One-line routing summary for the index and the OKF frontmatter. Must not end in a full stop: it is a label, not a sentence. Anchored to the end rather than banning '.', or any value containing a path such as '~/.config' would fail."
+		},
+		"status": {
+			"enum": ["proposed", "accepted", "superseded", "retired"]
+		},
+		"accepted_on": {
+			"type": "string",
+			"format": "date"
+		},
+		"last_changed_on": {
+			"type": "string",
+			"format": "date"
+		},
+		"tags": {
+			"type": "array",
+			"minItems": 1,
+			"uniqueItems": true,
+			"items": {
+				"type": "string",
+				"pattern": "^[a-z][a-z0-9-]*$"
+			}
+		},
+		"provenance": {
+			"type": "string",
+			"minLength": 10,
+			"description": "The evidence the decision rests on."
+		},
+		"enforced_in": {
+			"type": "array",
+			"minItems": 1,
+			"items": {
+				"type": "string"
+			},
+			"description": "The surfaces where the decision is actually binding."
+		},
+		"relates_to": {
+			"type": "array",
+			"description": "Typed edges over a closed vocabulary. Every relation is paired with its inverse so a validator can check symmetry; a missing inverse is reported, never failed.",
+			"items": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": ["relation", "target"],
+				"properties": {
+					"relation": {
+						"enum": [
+							"extends",
+							"extended_by",
+							"split_from",
+							"split_to",
+							"supersedes",
+							"superseded_by",
+							"tests",
+							"tested_by",
+							"depends_on",
+							"depended_on_by",
+							"excepts",
+							"excepted_by",
+							"see_also"
+						]
+					},
+					"target": {
+						"type": "string",
+						"pattern": "^[A-Z]{2,4}-[0-9]{4}$"
+					},
+					"note": {
+						"type": "string"
+					}
+				}
+			}
+		},
+		"decision": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["given", "we_prefer", "because", "unless"],
+			"properties": {
+				"given": {
+					"type": "string",
+					"minLength": 10
+				},
+				"we_prefer": {
+					"type": "string",
+					"minLength": 10,
+					"description": "Must name the rejected alternative; the shape is 'X, over Y'."
+				},
+				"because": {
+					"type": "string",
+					"minLength": 10
+				},
+				"unless": {
+					"type": "string",
+					"minLength": 5,
+					"description": "The escape hatch, or 'never' when the decision is unconditional."
+				}
+			}
+		},
+		"consequences": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["pros", "cons"],
+			"properties": {
+				"pros": {
+					"type": "array",
+					"minItems": 1,
+					"items": {
+						"type": "string"
+					}
+				},
+				"cons": {
+					"type": "array",
+					"minItems": 1,
+					"items": {
+						"type": "string"
+					},
+					"description": "A record with no cons has not been thought about."
+				}
+			}
+		}
+	}
+}

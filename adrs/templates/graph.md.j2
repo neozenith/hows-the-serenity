@@ -1,0 +1,43 @@
+{#- Companion graph view. Generated. Non-reserved, so it carries OKF frontmatter. -#}
+---
+type: Decision Graph
+title: Decision relationship graph
+description: Every typed edge between the bundle's decision records
+---
+
+<!-- GENERATED from the bundle's *.yml by okf_render.py. Do not edit; regenerate. -->
+
+# Decision relationship graph
+
+{{ node_count }} decision records, {{ edge_count }} typed edges, in {{ group_count }} groups.
+Every edge comes from a record's `relates_to` block, so this view cannot drift from the records.
+
+For an interactive view of the same graph, open [graph.html](graph.html).
+
+```cytoscape
+{ "data": "graph.json", "height": 620 }
+```
+
+## Edge vocabulary
+
+| Relation | Inverse | Meaning |
+|---|---|---|
+| `extends` | `extended_by` | Adds a clause to an existing decision without replacing it |
+| `split_from` | `split_to` | The record was carved out of another when one grew two decisions |
+| `supersedes` | `superseded_by` | Replaces the earlier decision; the earlier record stays, marked superseded |
+| `depends_on` | `depended_on_by` | The decision is only implementable because the other one holds |
+| `tests` | `tested_by` | Names how the other decision is verified |
+| `see_also` | `see_also` | Related reasoning, no dependency |
+
+## Asymmetries
+
+An edge whose inverse is missing on the far record.
+These are gaps in the record set, not rendering artifacts.
+
+{% if asymmetries %}
+{% for a in asymmetries -%}
+* `{{ a.source }}` declares `{{ a.relation }} {{ a.target }}`, but `{{ a.target }}` has no `{{ a.inverse }} {{ a.source }}`
+{% endfor %}
+{% else %}
+None: every edge has its inverse.
+{% endif %}

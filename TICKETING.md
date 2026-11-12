@@ -37,6 +37,36 @@ For this repo, the owner is `neozenith` and every GH Issue is assigned to them.
 gh issue create --title "[feat] {title}" --label enhancement --assignee neozenith --body-file {body}
 ```
 
+### A good GH Issue
+
+A good GH Issue defines its **tangible output**: the concrete thing that exists when the work is done.
+It names the artifact (a map layer, a dataset file, a page, a CLI command, a deployed resource), is checkable by someone other than the author, and uses terms from `docs/GLOSSARY.md` so the output has one meaning.
+Deduplication compares these outputs: two GH Issues with different outputs are different work.
+
+Every GH Issue body has these sections:
+
+1. **User stories.** One line per role the change affects:
+   - `As a User, I want … so that …` (someone browsing the site)
+   - `As a Maintainer, I want … so that …` (someone developing or operating the repo)
+   - `As an Admin, I want … so that …` (someone managing access, infra or accounts)
+
+   Omit a role only when the change does not affect it.
+2. **Tangible output.** What exists when the work is done, and what a user sees or can do with it.
+   Include at least two Mermaid diagrams: a **BEFORE** diagram of the current state and an **AFTER** diagram of the state the change produces, drawn at the same level of detail so the difference is visible side by side.
+3. **In scope.** What this GH Issue delivers.
+4. **Out of scope.** What it deliberately does not deliver, with a link to the GH Issue that does where one exists.
+5. **Test and verification.** How correctness is checked: the unit, e2e or data tests that cover it, and any manual check.
+6. **Evidence of completion.** Proof the code **works**, not just that it was written: for example e2e screenshots, a CI run link, a deployed URL, query output or a before/after comparison. Attach it to the PR.
+7. **Open questions.** Every requirement that is ambiguous and cannot be resolved from the repo's ADRs (Architecture Decision Records, indexed in `adrs/index.md`), as a numbered list:
+
+   ```
+   - HTS{issue_number}-Q01: {question}
+   - HTS{issue_number}-Q02: {question}
+   ```
+
+   Ids are stable: never renumber, and mark an answered question with its answer instead of deleting it.
+   Work does not start while a question that blocks the output is open.
+
 ## Deduplication
 
 Before creating a GH Issue, search open and closed GH Issues for the same work.
@@ -44,6 +74,13 @@ Before creating a GH Issue, search open and closed GH Issues for the same work.
 ```sh
 gh issue list --state all --search "{key words} in:title,body" --json number,title,state,createdAt --limit 50
 ```
+
+**Same work means the same outcome**, not similar titles, shared inputs or the same domain.
+Before calling two GH Issues duplicates, state the outcome each one delivers.
+If one could be done without the other and the product would end up different, they are not duplicates: they are distinct work, possibly sharing an input.
+Example: #6 (walkability corridors around bus routes) and #14 (bus commute contours) both need bus stops, but #6 answers "can I walk to the bus?" and #14 answers "where does the bus get me?".
+Check terms against `docs/GLOSSARY.md` before comparing; a misread term (such as `in-vehicle time`) is the usual cause of a false duplicate.
+A suspected duplicate is raised with the Maintainer as a question, never merged on the Agent's judgement.
 
 The earliest GH Issue is the **canonical** GH Issue.
 Every later GH Issue for the same work is closed as a duplicate of it, never the other way round.
