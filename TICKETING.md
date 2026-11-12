@@ -37,6 +37,18 @@ For this repo, the owner is `neozenith` and every GH Issue is assigned to them.
 gh issue create --title "[feat] {title}" --label enhancement --assignee neozenith --body-file {body}
 ```
 
+### A good GH Issue
+
+A good GH Issue defines its **tangible output**: the concrete thing that exists when the work is done.
+
+- **Name the artifact,** such as a map layer, a dataset file, a page, a CLI command or a deployed resource.
+- **Say what a user sees or can do with it,** in one sentence.
+- **Make it checkable.** Someone else can confirm the output exists without asking the author.
+- **Keep method separate from outcome.** Scope can describe how; the output says what.
+- **Use glossary terms** from `docs/GLOSSARY.md` so the output has one meaning.
+
+A clear output is also what Deduplication compares: two GH Issues with different outputs are different work.
+
 ## Deduplication
 
 Before creating a GH Issue, search open and closed GH Issues for the same work.
