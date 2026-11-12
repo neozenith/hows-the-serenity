@@ -17,6 +17,10 @@ Alternative project titles considered:
 - Google Maps API Key
 - `uv` installed (for dependency management)
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 [MIT License](LICENSE)

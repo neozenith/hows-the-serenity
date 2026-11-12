@@ -1102,7 +1102,7 @@ const buildForecastTrace = (s: SuburbTimeSeries) => {
 
 1. Why does T5.4 need a Vitest test? — To verify the SQL + row-shape transformation.
 2. Why does that need DuckDB at the Vitest layer? — It doesn't. Playwright e2e already exercises the live DuckDB round-trip; the Python bake tests already verify the schema. The only piece not covered elsewhere is the pure-TS row → `ForecastPoint` mapping.
-3. Why is pure-TS the natural seam? — `src/CLAUDE.md` documents `src/lib/` as the location for "pure TypeScript utilities, no JSX" — explicitly a unit-testable layer. The mapping logic belongs in that seam by convention.
+3. Why is pure-TS the natural seam? — `src/AGENTS.md` documents `src/lib/` as the location for "pure TypeScript utilities, no JSX" — explicitly a unit-testable layer. The mapping logic belongs in that seam by convention.
 4. Why fight the test environment? — Specs frequently inherit default assumptions ("write a unit test against the library"). When the assumption collides with the project's actual layering, refactor the question, not the runtime.
 
 **Cascading implications:**
@@ -2144,7 +2144,7 @@ Patterns that pass CI but silently violate the project's codified conventions. E
   - *Looks done but isn't*: works on the dev machine; CI fails with `ModuleNotFoundError`.
 
 - **Lowering Biome rule severity to silence a finding**: edit `biome.json` to set a rule to `"warn"` or `"off"`.
-  - *Why it's wrong*: root `CLAUDE.md` § "Strict no-warnings policy" — `biome ci .` fails on **any** diagnostic level. Downgrade hides, doesn't fix.
+  - *Why it's wrong*: root `AGENTS.md` § "Strict no-warnings policy" — `biome ci .` fails on **any** diagnostic level. Downgrade hides, doesn't fix.
   - *How to catch*: diff `biome.json` in PR review; require justification for every severity change.
   - *Looks done but isn't*: CI green, dangling find resurfaces on next tightening.
 
