@@ -141,4 +141,4 @@ Templated SQL in `sites/webapp/sql/*.sql` uses `{{lga_name}}` / `{{suburb_name}}
 ## Working directory & data serving
 
 - **Static asset serving**: GeoJSON + DuckDB files live under `data/` at the project root (outside `src/` and outside `public/`). Vite only serves `public/` by default, so a symlink `public/data → ../data` exposes them at the dev URL `/data/<file>`.
-- **Bun + Vite**: project is set up per the project-level `CLAUDE.md` — runtime is `bun`, never `npm`/`yarn`/`pnpm`. All make targets go through `bun`.
+- **Bun + Vite**: project is set up per the project-level `AGENTS.md` — runtime is `bun`, never `npm`/`yarn`/`pnpm`. All make targets go through `bun`.

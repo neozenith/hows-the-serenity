@@ -8,8 +8,8 @@ accepted_on: 2026-11-12
 provenance: TICKETING.md began requiring that a GH Issue's open questions cover only what the repo's ADRs cannot resolve, and the repo had no ADRs; the Maintainer chose okf-yaml over a single-file log or one markdown file per decision
 enforced_in:
   - adrs/
-  - TICKETING.md
-  - CLAUDE.md
+  - docs/TICKETING.md
+  - AGENTS.md
   - Makefile
 generated: { by: human:maintainer, at: 2026-11-12T00:00:00Z }
 ---
