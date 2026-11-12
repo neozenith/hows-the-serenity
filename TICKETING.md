@@ -40,14 +40,31 @@ gh issue create --title "[feat] {title}" --label enhancement --assignee neozenit
 ### A good GH Issue
 
 A good GH Issue defines its **tangible output**: the concrete thing that exists when the work is done.
+It names the artifact (a map layer, a dataset file, a page, a CLI command, a deployed resource), is checkable by someone other than the author, and uses terms from `docs/GLOSSARY.md` so the output has one meaning.
+Deduplication compares these outputs: two GH Issues with different outputs are different work.
 
-- **Name the artifact,** such as a map layer, a dataset file, a page, a CLI command or a deployed resource.
-- **Say what a user sees or can do with it,** in one sentence.
-- **Make it checkable.** Someone else can confirm the output exists without asking the author.
-- **Keep method separate from outcome.** Scope can describe how; the output says what.
-- **Use glossary terms** from `docs/GLOSSARY.md` so the output has one meaning.
+Every GH Issue body has these sections:
 
-A clear output is also what Deduplication compares: two GH Issues with different outputs are different work.
+1. **User stories.** One line per role the change affects:
+   - `As a User, I want … so that …` (someone browsing the site)
+   - `As a Maintainer, I want … so that …` (someone developing or operating the repo)
+   - `As an Admin, I want … so that …` (someone managing access, infra or accounts)
+
+   Omit a role only when the change does not affect it.
+2. **Tangible output.** What exists when the work is done, and what a user sees or can do with it.
+3. **In scope.** What this GH Issue delivers.
+4. **Out of scope.** What it deliberately does not deliver, with a link to the GH Issue that does where one exists.
+5. **Test and verification.** How correctness is checked: the unit, e2e or data tests that cover it, and any manual check.
+6. **Evidence of completion.** Proof the code **works**, not just that it was written: for example e2e screenshots, a CI run link, a deployed URL, query output or a before/after comparison. Attach it to the PR.
+7. **Open questions.** Every requirement that is ambiguous and cannot be resolved from the repo's ADRs (Architecture Decision Records), as a numbered list:
+
+   ```
+   - HTS{issue_number}-Q01: {question}
+   - HTS{issue_number}-Q02: {question}
+   ```
+
+   Ids are stable: never renumber, and mark an answered question with its answer instead of deleting it.
+   Work does not start while a question that blocks the output is open.
 
 ## Deduplication
 
