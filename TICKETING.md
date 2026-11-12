@@ -57,7 +57,7 @@ Every GH Issue body has these sections:
 4. **Out of scope.** What it deliberately does not deliver, with a link to the GH Issue that does where one exists.
 5. **Test and verification.** How correctness is checked: the unit, e2e or data tests that cover it, and any manual check.
 6. **Evidence of completion.** Proof the code **works**, not just that it was written: for example e2e screenshots, a CI run link, a deployed URL, query output or a before/after comparison. Attach it to the PR.
-7. **Open questions.** Every requirement that is ambiguous and cannot be resolved from the repo's ADRs (Architecture Decision Records), as a numbered list:
+7. **Open questions.** Every requirement that is ambiguous and cannot be resolved from the repo's ADRs (Architecture Decision Records, indexed in `adrs/index.md`), as a numbered list:
 
    ```
    - HTS{issue_number}-Q01: {question}

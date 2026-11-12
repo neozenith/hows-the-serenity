@@ -1,0 +1,64 @@
+{#- One decision record -> OKF-conformant markdown. Generated; do not edit the output.
+    Rendered with trim_blocks + lstrip_blocks, so every blank line below is literal. -#}
+---
+type: Architecture Decision
+title: {{ rec.title | yamlq }}
+description: {{ rec.description | yamlq }}
+tags: [{{ rec.tags | join(', ') }}]
+status: {{ rec.status }}
+accepted_on: {{ rec.accepted_on }}
+{% if rec.plan_id %}
+plan_id: {{ rec.plan_id }}
+{% endif %}
+provenance: {{ rec.provenance | yamlq }}
+enforced_in:
+{% for item in rec.enforced_in %}
+  - {{ item | yamlq }}
+{% endfor %}
+generated: { by: {{ author }}, at: {{ rec.last_changed_on }}T00:00:00Z }
+---
+
+<!-- GENERATED from {{ rec.id }} by okf_render.py. Do not edit; edit the .yml and regenerate. -->
+{% if rec.relates_to %}
+
+## Relates to
+
+{% for e in rec.relates_to %}
+- {{ e.relation | relation_prose }} [{{ e.target }}]({{ e.target | record_link }}){% if e.get('note') %} ({{ e.get('note') }}){% endif %}
+
+{% endfor %}
+{% endif %}
+
+## Decision
+
+### The lens
+
+#### Given
+
+{{ rec.decision.given | one_sentence_per_line }}
+
+#### We prefer
+
+{{ rec.decision.we_prefer | one_sentence_per_line }}
+
+#### Because
+
+{{ rec.decision.because | one_sentence_per_line }}
+
+#### Unless
+
+{{ rec.decision.unless | one_sentence_per_line }}
+
+## Consequences
+
+### Pros
+
+{% for item in rec.consequences.pros %}
+- {{ item | one_sentence_per_line('  ') }}
+{% endfor %}
+
+### Cons
+
+{% for item in rec.consequences.cons %}
+- {{ item | one_sentence_per_line('  ') }}
+{% endfor %}

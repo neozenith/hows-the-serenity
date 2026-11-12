@@ -1,0 +1,28 @@
+{
+  "elements": [
+    {
+      "data": {
+        "id": "group-process",
+        "label": "process",
+        "colour": "#6366f1"
+      }
+    },
+    {
+      "data": {
+        "id": "ADR-0001",
+        "label": "0001",
+        "parent": "group-process",
+        "colour": "#6366f1",
+        "file": "0001-record-decisions-as-okf-yaml.md",
+        "title": "Record architecture decisions as okf-yaml records, not free-form markdown",
+        "description": "Decisions are YAML records validated by a schema, with markdown generated from them",
+        "status": "accepted",
+        "tags": "process, decisions"
+      }
+    }
+  ],
+  "layout": {
+    "name": "cose"
+  },
+  "height": 620
+}

@@ -15,7 +15,9 @@
 			"!!**/playwright-report",
 			"!!**/test-results",
 			"!!**/tmp",
-			"!!public/data"
+			"!!public/data",
+			"!!adrs/graph.html",
+			"!!adrs/graph.json"
 		]
 	},
 	"formatter": {

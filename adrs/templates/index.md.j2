@@ -1,0 +1,30 @@
+{#- OKF reserved file: a directory listing, no frontmatter. Generated. -#}
+<!-- GENERATED from the bundle's *.yml by okf_render.py. Do not edit; regenerate. -->
+
+# Decision Records
+
+{# A repeated `id / title / status` pattern is table-shaped, so it is rendered as
+   one. A table is also exempt from the prose gate's sentence budget, which would
+   otherwise read each bullet as one very long sentence. #}
+| Record | Decision | Status |
+|---|---|---|
+{% for rec in records -%}
+| [{{ rec.id }}]({{ rec.id | record_link }}) | {{ rec.title }} | {{ rec.status }} |
+{% endfor %}
+# By group
+
+{% for area, group in areas -%}
+## {{ area }}
+
+{% for rec in group -%}
+* [{{ rec.id }}]({{ rec.id | record_link }}) - {{ rec.description }}
+{% endfor %}
+{% endfor -%}
+# Relationship graph
+
+Open [graph.html](graph.html) to explore the records visually: click a node to read it, and links between records navigate the graph.
+The same edge set is rendered as prose in [graph.md](graph.md), and as data in [graph.json](graph.json).
+
+{% for e in edges -%}
+* {{ e.source }} --{{ e.relation }}--> {{ e.target }}
+{% endfor %}
