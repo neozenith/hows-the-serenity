@@ -1,0 +1,28 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "ManageProjectBuckets",
+			"Effect": "Allow",
+			"Action": "s3:*",
+			"Resource": [
+				"arn:aws:s3:::isochrones-data-backup-979037402244",
+				"arn:aws:s3:::isochrones-data-backup-979037402244/*",
+				"arn:aws:s3:::hts-*",
+				"arn:aws:s3:::hts-*/*"
+			]
+		},
+		{
+			"Sid": "ListAllBuckets",
+			"Effect": "Allow",
+			"Action": ["s3:ListAllMyBuckets", "s3:GetBucketLocation"],
+			"Resource": "*"
+		},
+		{
+			"Sid": "ProtectSourceDataBucketFromDeletion",
+			"Effect": "Deny",
+			"Action": ["s3:DeleteBucket", "s3:PutLifecycleConfiguration"],
+			"Resource": "arn:aws:s3:::isochrones-data-backup-979037402244"
+		}
+	]
+}

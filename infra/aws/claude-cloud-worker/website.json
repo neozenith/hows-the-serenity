@@ -1,0 +1,17 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "ManageCloudFront",
+			"Effect": "Allow",
+			"Action": "cloudfront:*",
+			"Resource": "*"
+		},
+		{
+			"Sid": "ManageCertificates",
+			"Effect": "Allow",
+			"Action": "acm:*",
+			"Resource": "*"
+		}
+	]
+}

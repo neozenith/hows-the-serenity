@@ -1,0 +1,95 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "CreateWorkloadRolesOnlyUnderBoundary",
+			"Effect": "Allow",
+			"Action": ["iam:CreateRole", "iam:PutRolePermissionsBoundary"],
+			"Resource": "arn:aws:iam::979037402244:role/hts-*",
+			"Condition": {
+				"StringEquals": {
+					"iam:PermissionsBoundary": "arn:aws:iam::979037402244:policy/ClaudeCloudWorkerBoundary"
+				}
+			}
+		},
+		{
+			"Sid": "ManageWorkloadRoles",
+			"Effect": "Allow",
+			"Action": [
+				"iam:GetRole",
+				"iam:UpdateRole",
+				"iam:UpdateAssumeRolePolicy",
+				"iam:DeleteRole",
+				"iam:TagRole",
+				"iam:UntagRole",
+				"iam:PutRolePolicy",
+				"iam:GetRolePolicy",
+				"iam:DeleteRolePolicy",
+				"iam:AttachRolePolicy",
+				"iam:DetachRolePolicy",
+				"iam:ListRolePolicies",
+				"iam:ListAttachedRolePolicies"
+			],
+			"Resource": "arn:aws:iam::979037402244:role/hts-*"
+		},
+		{
+			"Sid": "ManageWorkloadPolicies",
+			"Effect": "Allow",
+			"Action": [
+				"iam:CreatePolicy",
+				"iam:CreatePolicyVersion",
+				"iam:DeletePolicy",
+				"iam:DeletePolicyVersion",
+				"iam:GetPolicy",
+				"iam:GetPolicyVersion",
+				"iam:ListPolicyVersions",
+				"iam:TagPolicy"
+			],
+			"Resource": "arn:aws:iam::979037402244:policy/hts-*"
+		},
+		{
+			"Sid": "PassWorkloadRolesToServices",
+			"Effect": "Allow",
+			"Action": "iam:PassRole",
+			"Resource": "arn:aws:iam::979037402244:role/hts-*",
+			"Condition": {
+				"StringEquals": {
+					"iam:PassedToService": [
+						"ecs-tasks.amazonaws.com",
+						"scheduler.amazonaws.com",
+						"events.amazonaws.com",
+						"lambda.amazonaws.com",
+						"pipes.amazonaws.com"
+					]
+				}
+			}
+		},
+		{
+			"Sid": "ReadIam",
+			"Effect": "Allow",
+			"Action": [
+				"iam:ListRoles",
+				"iam:ListPolicies",
+				"iam:GetPolicy",
+				"iam:GetPolicyVersion"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "NeverRemoveBoundary",
+			"Effect": "Deny",
+			"Action": "iam:DeleteRolePermissionsBoundary",
+			"Resource": "*"
+		},
+		{
+			"Sid": "NeverModifyOwnAccess",
+			"Effect": "Deny",
+			"NotAction": ["iam:Get*", "iam:List*"],
+			"Resource": [
+				"arn:aws:iam::979037402244:role/ClaudeCloudWorker",
+				"arn:aws:iam::979037402244:user/claudecloudworker",
+				"arn:aws:iam::979037402244:policy/ClaudeCloudWorker*"
+			]
+		}
+	]
+}

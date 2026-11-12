@@ -1,0 +1,100 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "ManageProjectLambdas",
+			"Effect": "Allow",
+			"Action": "lambda:*",
+			"Resource": [
+				"arn:aws:lambda:*:979037402244:function:hts-*",
+				"arn:aws:lambda:*:979037402244:layer:hts-*",
+				"arn:aws:lambda:*:979037402244:layer:hts-*:*"
+			]
+		},
+		{
+			"Sid": "LambdaAccountLevel",
+			"Effect": "Allow",
+			"Action": [
+				"lambda:List*",
+				"lambda:GetAccountSettings",
+				"lambda:GetEventSourceMapping",
+				"lambda:CreateEventSourceMapping",
+				"lambda:UpdateEventSourceMapping",
+				"lambda:DeleteEventSourceMapping",
+				"lambda:TagResource"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "ManageProjectEventBridge",
+			"Effect": "Allow",
+			"Action": "events:*",
+			"Resource": [
+				"arn:aws:events:*:979037402244:event-bus/hts-*",
+				"arn:aws:events:*:979037402244:rule/hts-*",
+				"arn:aws:events:*:979037402244:rule/hts-*/*",
+				"arn:aws:events:*:979037402244:archive/hts-*",
+				"arn:aws:events:*:979037402244:connection/hts-*",
+				"arn:aws:events:*:979037402244:api-destination/hts-*"
+			]
+		},
+		{
+			"Sid": "EventBridgeDefaultBusAndDiscovery",
+			"Effect": "Allow",
+			"Action": [
+				"events:PutEvents",
+				"events:List*",
+				"events:Describe*",
+				"events:TestEventPattern"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "ManageProjectPipes",
+			"Effect": "Allow",
+			"Action": "pipes:*",
+			"Resource": "arn:aws:pipes:*:979037402244:pipe/hts-*"
+		},
+		{
+			"Sid": "ListPipes",
+			"Effect": "Allow",
+			"Action": "pipes:ListPipes",
+			"Resource": "*"
+		},
+		{
+			"Sid": "ManageProjectQueues",
+			"Effect": "Allow",
+			"Action": "sqs:*",
+			"Resource": "arn:aws:sqs:*:979037402244:hts-*"
+		},
+		{
+			"Sid": "ManageProjectTopics",
+			"Effect": "Allow",
+			"Action": "sns:*",
+			"Resource": "arn:aws:sns:*:979037402244:hts-*"
+		},
+		{
+			"Sid": "ManageProjectTables",
+			"Effect": "Allow",
+			"Action": "dynamodb:*",
+			"Resource": [
+				"arn:aws:dynamodb:*:979037402244:table/hts-*",
+				"arn:aws:dynamodb:*:979037402244:table/hts-*/*"
+			]
+		},
+		{
+			"Sid": "ServerlessDiscovery",
+			"Effect": "Allow",
+			"Action": [
+				"sqs:ListQueues",
+				"sns:ListTopics",
+				"sns:ListSubscriptions",
+				"dynamodb:ListTables",
+				"dynamodb:ListStreams",
+				"dynamodb:DescribeLimits",
+				"dynamodb:DescribeEndpoints"
+			],
+			"Resource": "*"
+		}
+	]
+}

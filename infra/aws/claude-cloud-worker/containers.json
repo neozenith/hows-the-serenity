@@ -1,0 +1,67 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "EcrAuthAndDiscovery",
+			"Effect": "Allow",
+			"Action": [
+				"ecr:GetAuthorizationToken",
+				"ecr:DescribeRepositories",
+				"ecr:DescribeRegistry"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "ManageProjectRepositories",
+			"Effect": "Allow",
+			"Action": "ecr:*",
+			"Resource": "arn:aws:ecr:*:979037402244:repository/hts-*"
+		},
+		{
+			"Sid": "ManageEcs",
+			"Effect": "Allow",
+			"Action": "ecs:*",
+			"Resource": "*"
+		},
+		{
+			"Sid": "ManageSchedules",
+			"Effect": "Allow",
+			"Action": "scheduler:*",
+			"Resource": [
+				"arn:aws:scheduler:*:979037402244:schedule/*/hts-*",
+				"arn:aws:scheduler:*:979037402244:schedule-group/hts-*"
+			]
+		},
+		{
+			"Sid": "ReadSchedules",
+			"Effect": "Allow",
+			"Action": ["scheduler:List*", "scheduler:Get*"],
+			"Resource": "*"
+		},
+		{
+			"Sid": "NetworkingForFargate",
+			"Effect": "Allow",
+			"Action": [
+				"ec2:Describe*",
+				"ec2:CreateSecurityGroup",
+				"ec2:DeleteSecurityGroup",
+				"ec2:AuthorizeSecurityGroupIngress",
+				"ec2:AuthorizeSecurityGroupEgress",
+				"ec2:RevokeSecurityGroupIngress",
+				"ec2:RevokeSecurityGroupEgress",
+				"ec2:ModifySecurityGroupRules",
+				"ec2:CreateTags"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "EcsServiceLinkedRole",
+			"Effect": "Allow",
+			"Action": "iam:CreateServiceLinkedRole",
+			"Resource": "*",
+			"Condition": {
+				"StringEquals": { "iam:AWSServiceName": "ecs.amazonaws.com" }
+			}
+		}
+	]
+}
