@@ -52,6 +52,7 @@ Every GH Issue body has these sections:
 
    Omit a role only when the change does not affect it.
 2. **Tangible output.** What exists when the work is done, and what a user sees or can do with it.
+   Include at least two Mermaid diagrams: a **BEFORE** diagram of the current state and an **AFTER** diagram of the state the change produces, drawn at the same level of detail so the difference is visible side by side.
 3. **In scope.** What this GH Issue delivers.
 4. **Out of scope.** What it deliberately does not deliver, with a link to the GH Issue that does where one exists.
 5. **Test and verification.** How correctness is checked: the unit, e2e or data tests that cover it, and any manual check.
