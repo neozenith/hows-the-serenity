@@ -183,3 +183,21 @@ The config reads `process.env.PAGES_BASE_PATH ?? "/"` so:
 - Pages deploy → `base: "/<repo>/"` (or `"/"` if a custom domain is configured)
 
 Don't hard-code a base path; always go through the env var so a future custom-domain switch is a one-flag flip in repo settings.
+
+## AWS access (cloud sessions)
+
+Claude cloud sessions get AWS access through account `979037402244`. Policies and scripts live in `infra/aws/claude-cloud-worker/`.
+
+- The `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables belong to IAM user `claudecloudworker`. Its only permission is `sts:AssumeRole` into `arn:aws:iam::979037402244:role/ClaudeCloudWorker`.
+- Create the `ccw` profile once per VM:
+
+  ```bash
+  aws configure set profile.ccw.role_arn arn:aws:iam::979037402244:role/ClaudeCloudWorker
+  aws configure set profile.ccw.credential_source Environment
+  aws configure set profile.ccw.region ap-southeast-2
+  ```
+
+- Always pass `--profile ccw`, or use `boto3.Session(profile_name="ccw")`. `AWS_PROFILE=ccw` is ignored while the key variables are set. The CLI assumes and refreshes the role itself.
+- Name every resource you create with the `hts-` prefix (buckets, ECR repos, Lambda functions, queues, topics, tables, roles, log groups under `/hts/`). Anything else is denied.
+- Create IAM roles only as `hts-*` with `--permissions-boundary arn:aws:iam::979037402244:policy/ClaudeCloudWorkerBoundary`.
+- AccessDenied as `user/claudecloudworker` means `--profile ccw` is missing. AccessDenied as `assumed-role/ClaudeCloudWorker` means the role lacks a permission: ask the user rather than working around it.
