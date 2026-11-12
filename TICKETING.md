@@ -45,6 +45,13 @@ Before creating a GH Issue, search open and closed GH Issues for the same work.
 gh issue list --state all --search "{key words} in:title,body" --json number,title,state,createdAt --limit 50
 ```
 
+**Same work means the same outcome**, not similar titles, shared inputs or the same domain.
+Before calling two GH Issues duplicates, state the outcome each one delivers.
+If one could be done without the other and the product would end up different, they are not duplicates: they are distinct work, possibly sharing an input.
+Example: #6 (walkability corridors around bus routes) and #14 (bus commute contours) both need bus stops, but #6 answers "can I walk to the bus?" and #14 answers "where does the bus get me?".
+Check terms against `docs/GLOSSARY.md` before comparing; a misread term (such as `in-vehicle time`) is the usual cause of a false duplicate.
+A suspected duplicate is raised with the Maintainer as a question, never merged on the Agent's judgement.
+
 The earliest GH Issue is the **canonical** GH Issue.
 Every later GH Issue for the same work is closed as a duplicate of it, never the other way round.
 
