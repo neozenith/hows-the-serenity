@@ -54,3 +54,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan

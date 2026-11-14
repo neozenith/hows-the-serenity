@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# Guardrails for the Claude cloud worker. Bootstrap only, never Terraform-managed.
+#
+# Terraform (infra/terraform/) manages the ClaudeCloudWorker user, role and
+# permission policies through GitHub Actions. Whoever can apply Terraform can
+# therefore rewrite those policies. These three boundaries cap what any such
+# rewrite can achieve, and they live here, outside Terraform, so the GitHub
+# Actions role cannot edit the cap it is held to. deploy-policy.yaml only lets
+# that role change the worker's policies while these boundaries are attached.
+#
+#   ClaudeCloudWorkerUserCeiling   boundary on user/claudecloudworker
+#   ClaudeCloudWorkerCeiling       boundary on role/ClaudeCloudWorker
+#   ClaudeCloudWorkerBoundary      boundary every hts-* workload role must carry
+#
+#   aws cloudformation deploy \
+#     --template-file infra/bootstrap/guardrails.yaml \
+#     --stack-name hows-the-serenity-guardrails \
+#     --region ap-southeast-2 \
+#     --capabilities CAPABILITY_NAMED_IAM
+
+Description: Permission ceilings for the Claude cloud worker (bootstrap only - never Terraform-managed)
+
+Resources:
+  # The long-lived access key lives in a Claude cloud environment, readable by
+  # anyone who uses that environment. Whatever Terraform attaches to the user,
+  # the key can only ever assume the worker role.
+  UserCeiling:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: ClaudeCloudWorkerUserCeiling
+      Description: Boundary for user/claudecloudworker - assume ClaudeCloudWorker and nothing else
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AssumeWorkerRoleOnly
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/ClaudeCloudWorker"
+
+  # The widest the worker role can ever be, whatever Terraform attaches to it.
+  # Every service the worker policies grant is listed, so this changes nothing
+  # today. What it removes is the path to account admin: no IAM outside hts-*,
+  # no users or access keys, and no role without the workload boundary.
+  RoleCeiling:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: ClaudeCloudWorkerCeiling
+      Description: Boundary for role/ClaudeCloudWorker - project services only, IAM confined to hts-*
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ProjectServices
+            Effect: Allow
+            Action:
+              - s3:*
+              - ecr:*
+              - ecs:*
+              - scheduler:*
+              - logs:*
+              - cloudwatch:*
+              - cloudfront:*
+              - acm:*
+              - lambda:*
+              - events:*
+              - pipes:*
+              - sqs:*
+              - sns:*
+              - dynamodb:*
+              - sts:GetCallerIdentity
+            Resource: "*"
+          - Sid: FargateNetworking
+            Effect: Allow
+            Action:
+              - ec2:Describe*
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupEgress
+              - ec2:ModifySecurityGroupRules
+              - ec2:CreateTags
+            Resource: "*"
+          - Sid: IamConfinedToProject
+            Effect: Allow
+            Action: iam:*
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/hts-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:policy/hts-*"
+          - Sid: IamReadAndServiceLinkedRoles
+            Effect: Allow
+            Action:
+              - iam:Get*
+              - iam:List*
+              - iam:CreateServiceLinkedRole
+            Resource: "*"
+          - Sid: RolesOnlyWithWorkloadBoundary
+            Effect: Deny
+            Action:
+              - iam:CreateRole
+              - iam:PutRolePermissionsBoundary
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/ClaudeCloudWorkerBoundary"
+          - Sid: NeverRemoveBoundaries
+            Effect: Deny
+            Action:
+              - iam:DeleteRolePermissionsBoundary
+              - iam:DeleteUserPermissionsBoundary
+            Resource: "*"
+
+  # Workload roles the worker creates (Lambda, ECS task, scheduler roles) must
+  # carry this boundary. It allows the runtime calls a project workload makes.
+  WorkloadBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: ClaudeCloudWorkerBoundary
+      Description: Boundary every hts-* workload role created by the Claude cloud worker must carry
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ProjectData
+            Effect: Allow
+            Action: s3:*
+            Resource:
+              - !Sub "arn:aws:s3:::isochrones-data-backup-${AWS::AccountId}"
+              - !Sub "arn:aws:s3:::isochrones-data-backup-${AWS::AccountId}/*"
+              - arn:aws:s3:::hts-*
+              - arn:aws:s3:::hts-*/*
+          - Sid: PullImagesAndWriteLogs
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - cloudwatch:PutMetricData
+            Resource: "*"
+          - Sid: ProjectSecrets
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - ssm:GetParameter
+              - ssm:GetParameters
+            Resource:
+              - !Sub "arn:aws:secretsmanager:*:${AWS::AccountId}:secret:hts-*"
+              - !Sub "arn:aws:ssm:*:${AWS::AccountId}:parameter/hts/*"
+          - Sid: ProjectServerlessRuntime
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+              - events:PutEvents
+              - sqs:SendMessage
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:ChangeMessageVisibility
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - sns:Publish
+              - dynamodb:GetItem
+              - dynamodb:BatchGetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:BatchWriteItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:ConditionCheckItem
+              - dynamodb:DescribeStream
+              - dynamodb:GetRecords
+              - dynamodb:GetShardIterator
+              - dynamodb:ListStreams
+            Resource:
+              - !Sub "arn:aws:lambda:*:${AWS::AccountId}:function:hts-*"
+              - !Sub "arn:aws:events:*:${AWS::AccountId}:event-bus/*"
+              - !Sub "arn:aws:sqs:*:${AWS::AccountId}:hts-*"
+              - !Sub "arn:aws:sns:*:${AWS::AccountId}:hts-*"
+              - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/hts-*"
+              - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/hts-*/*"
+          - Sid: SchedulerRunsProjectTasks
+            Effect: Allow
+            Action: ecs:RunTask
+            Resource: "*"
+          - Sid: SchedulerPassesProjectRoles
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/hts-*"
+
+Outputs:
+  UserCeilingArn:
+    Value: !Ref UserCeiling
+  RoleCeilingArn:
+    Value: !Ref RoleCeiling
+  WorkloadBoundaryArn:
+    Value: !Ref WorkloadBoundary
