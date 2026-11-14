@@ -202,8 +202,9 @@ Claude cloud sessions get AWS access through account `979037402244`. Terraform i
 - Create IAM roles only as `hts-*` with `--permissions-boundary arn:aws:iam::979037402244:policy/ClaudeCloudWorkerBoundary`.
 - AccessDenied as `user/claudecloudworker` means `--profile ccw` is missing. AccessDenied as `assumed-role/ClaudeCloudWorker` means the role lacks a permission: ask the user rather than working around it.
 
+- To change the worker's permissions, edit or add a file in `infra/terraform/policies/` and open a PR. `terraform-plan.yml` posts the plan as a PR comment; merging applies it. Never change worker IAM with the CLI: Terraform will revert it.
+- A copy of the site is served by CloudFront from the private bucket `hts-site-979037402244`, deployed by `aws-deploy.yml` alongside GitHub Pages. `terraform -chdir=infra/terraform output site_url` prints its URL.
+
 ## Commit attribution
 
 Commits and PRs in this repo carry no AI attribution: no `Co-Authored-By: Claude` trailer, no `Claude-Session:` link and no "Generated with Claude Code" footer. The Maintainer is the sole author.
-- To change the worker's permissions, edit or add a file in `infra/terraform/policies/` and open a PR. `terraform-plan.yml` posts the plan as a PR comment; merging applies it. Never change worker IAM with the CLI: Terraform will revert it.
-- A copy of the site is served by CloudFront from the private bucket `hts-site-979037402244`, deployed by `aws-deploy.yml` alongside GitHub Pages. `terraform -chdir=infra/terraform output site_url` prints its URL.
