@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# One Terraform state bucket, for one repo.
+#
+# REUSABLE: deploy this template once per repo. It takes the same GitHubRepo
+# parameter as tfstate-role.yaml and derives the bucket name the same way, so
+# the pair cannot disagree about what the bucket is called.
+#
+#   aws cloudformation deploy \
+#     --template-file tfstate-bucket.yaml \
+#     --stack-name hows-the-serenity-tfstate-bucket \
+#     --region ap-southeast-2 \
+#     --parameter-overrides GitHubRepo=hows-the-serenity
+#
+# See README.md in this folder.
+#
+# Re-running converges, so a partial run is safe to repeat.
+
+Description: Terraform state bucket for one repo (bootstrap only - never Terraform-managed)
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Description: Repo whose state this bucket holds. The only parameter that must change per run.
+    AllowedPattern: "^[a-z0-9][a-z0-9._-]{0,62}$"
+
+  # Empty derives <repo>-tfstate-<account-id>, which is the naming convention
+  # tfstate-role.yaml also derives. Override both together or neither.
+  BucketName:
+    Type: String
+    Description: Explicit bucket name. Empty means derive it from GitHubRepo and the account id.
+    Default: ""
+    AllowedPattern: "^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+
+Conditions:
+  DeriveBucketName: !Equals [!Ref BucketName, ""]
+
+Resources:
+  StateBucket:
+    Type: AWS::S3::Bucket
+    # Deleting the bootstrap stack must never delete the state it holds.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If
+        - DeriveBucketName
+        - !Sub "${GitHubRepo}-tfstate-${AWS::AccountId}"
+        - !Ref BucketName
+      # A state file is a full description of an estate, so a bad apply is
+      # recoverable only if the previous version is still there.
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Purpose
+          Value: terraform-state
+        - Key: Repo
+          Value: !Ref GitHubRepo
+
+  # Terraform reaches this bucket over TLS or not at all. The role policy in
+  # tfstate-role.yaml grants the access; this denies the insecure transport for
+  # every principal, including one that policy has not anticipated.
+  StateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${StateBucket}"
+              - !Sub "arn:aws:s3:::${StateBucket}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+Outputs:
+  BucketName:
+    Description: Value for bucket in this repo's backend block
+    Value: !Ref StateBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketName"
+  BucketArn:
+    Value: !GetAtt StateBucket.Arn
+

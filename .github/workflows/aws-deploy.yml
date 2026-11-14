@@ -1,0 +1,94 @@
+name: aws deploy
+
+# Merging to main applies infra/terraform and then ships the site onto the
+# CloudFront copy, in one job, so the sync reads the bucket and distribution id
+# from the apply that just ran. GitHub Pages deploys separately from build.yml.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# Never two applies against one state file, and never cancel one mid-flight.
+concurrency:
+  group: aws-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Deliberately no `environment:`. It would rewrite the OIDC subject to
+    # repo:<owner>/<repo>:environment:<name>, which the role's trust policy
+    # (pinned to refs/heads/main) would refuse.
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: |
+          terraform -chdir=infra/terraform init -input=false \
+            -backend-config="bucket=${{ vars.TFSTATE_BUCKET }}" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+
+      - name: terraform apply
+        run: terraform -chdir=infra/terraform apply -input=false -auto-approve
+
+      - name: read outputs
+        id: tf
+        run: terraform -chdir=infra/terraform output -json | jq -r 'to_entries[] | "\(.key)=\(.value.value)"' >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # No PAGES_BASE_PATH: the distribution serves from the root, so Vite's
+      # base stays "/".
+      - name: build
+        run: bun run build
+
+      # Two passes, split on whether a file's NAME changes when its bytes do.
+      # Only Vite's hashed output under assets/ can safely be immutable;
+      # everything copied from public/ (including public/data) keeps its name
+      # across rebuilds and must revalidate. Each pass deletes within its own
+      # filter, so every file is considered exactly once.
+      - name: upload hashed assets
+        run: |
+          aws s3 sync dist/ "s3://${{ steps.tf.outputs.site_bucket }}/" --delete --no-progress \
+            --exclude "*" --include "assets/*" \
+            --cache-control "public,max-age=31536000,immutable"
+
+      - name: upload stable-name files
+        run: |
+          aws s3 sync dist/ "s3://${{ steps.tf.outputs.site_bucket }}/" --delete --no-progress \
+            --exclude "assets/*" \
+            --cache-control "public,max-age=0,must-revalidate"
+
+      - name: invalidate
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tf.outputs.distribution_id }}" \
+            --paths "/*" --query 'Invalidation.Id' --output text
+
+      - name: smoke test
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.tf.outputs.site_url }}/")
+          echo "GET ${{ steps.tf.outputs.site_url }}/ -> $code"
+          test "$code" = 200
+
+      - name: summary
+        run: echo "Deployed ${{ steps.tf.outputs.site_url }}" >> "$GITHUB_STEP_SUMMARY"

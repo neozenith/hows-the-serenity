@@ -186,7 +186,7 @@ Don't hard-code a base path; always go through the env var so a future custom-do
 
 ## AWS access (cloud sessions)
 
-Claude cloud sessions get AWS access through account `979037402244`. Policies and scripts live in `infra/aws/claude-cloud-worker/`.
+Claude cloud sessions get AWS access through account `979037402244`. Terraform in `infra/terraform/` manages the worker (policies in `infra/terraform/policies/`, one managed policy per file), applied by `.github/workflows/aws-deploy.yml` on push to `main`. Guardrail boundaries live in CloudFormation under `infra/bootstrap/` and are never Terraform-managed. Check access with `bash infra/scripts/verify-claude-cloud-worker.sh`.
 
 - The `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables belong to IAM user `claudecloudworker`. Its only permission is `sts:AssumeRole` into `arn:aws:iam::979037402244:role/ClaudeCloudWorker`.
 - Create the `ccw` profile once per VM:
@@ -201,6 +201,9 @@ Claude cloud sessions get AWS access through account `979037402244`. Policies an
 - Name every resource you create with the `hts-` prefix (buckets, ECR repos, Lambda functions, queues, topics, tables, roles, log groups under `/hts/`). Anything else is denied.
 - Create IAM roles only as `hts-*` with `--permissions-boundary arn:aws:iam::979037402244:policy/ClaudeCloudWorkerBoundary`.
 - AccessDenied as `user/claudecloudworker` means `--profile ccw` is missing. AccessDenied as `assumed-role/ClaudeCloudWorker` means the role lacks a permission: ask the user rather than working around it.
+
+- To change the worker's permissions, edit or add a file in `infra/terraform/policies/` and open a PR. `terraform-plan.yml` posts the plan as a PR comment; merging applies it. Never change worker IAM with the CLI: Terraform will revert it.
+- A copy of the site is served by CloudFront from the private bucket `hts-site-979037402244`, deployed by `aws-deploy.yml` alongside GitHub Pages. `terraform -chdir=infra/terraform output site_url` prints its URL.
 
 ## Commit attribution
 

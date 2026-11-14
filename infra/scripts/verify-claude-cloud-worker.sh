@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Live permission check as the ClaudeCloudWorker role. Expects the worker's user keys in
 # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and a `ccw` profile (role_arn + credential_source=Environment).
-# Run from the repo root:  bash infra/aws/claude-cloud-worker/verify.sh
+# Run from the repo root:  bash infra/scripts/verify-claude-cloud-worker.sh
 set -uo pipefail
 
 ACCOUNT=979037402244
@@ -37,7 +37,7 @@ check deny  "create non-hts role"           "${A[@]}" iam create-role --role-nam
 	--permissions-boundary "arn:aws:iam::${ACCOUNT}:policy/ClaudeCloudWorkerBoundary"
 check deny  "attach admin to own role"      "${A[@]}" iam attach-role-policy --role-name ClaudeCloudWorker --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
 check deny  "edit the boundary policy"      "${A[@]}" iam create-policy-version --policy-arn "arn:aws:iam::${ACCOUNT}:policy/ClaudeCloudWorkerBoundary" \
-	--policy-document file://infra/aws/claude-cloud-worker/boundary.json
+	--policy-document file://infra/terraform/policies/s3.json
 check deny  "create IAM user"               "${A[@]}" iam create-user --user-name verify-escalate
 
 # Serverless

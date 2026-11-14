@@ -91,6 +91,19 @@ Pinned to current major versions as of 2026-04. Bump majors during routine maint
 - `pull_request` — produces only a workflow artifact (and an e2e failure bundle if applicable)
 - `workflow_dispatch` — enables manual runs from the Actions tab
 
+## AWS workflows: `terraform-plan.yml` and `aws-deploy.yml`
+
+Both assume `vars.AWS_ROLE_ARN` (`gha-tfstate-hows-the-serenity`) through GitHub OIDC. The role, its state bucket and its deploy policy are CloudFormation stacks from `infra/bootstrap/deploy.sh`, which also sets the `AWS_ROLE_ARN`, `AWS_REGION` and `TFSTATE_BUCKET` repository variables.
+
+| Workflow | Trigger | Does |
+|----------|---------|------|
+| `terraform-plan.yml` | PR touching `infra/terraform/**` | fmt, validate, plan (no lock); posts the plan as a sticky PR comment with account ids masked |
+| `aws-deploy.yml` | push to `main`, manual | `terraform apply`, build with base `/`, two-pass `aws s3 sync` (hashed `assets/` immutable, everything else revalidates), CloudFront invalidation, smoke test |
+
+- **No `environment:` on these jobs.** It rewrites the OIDC subject and the role's trust policy, pinned to `refs/heads/main` and `pull_request`, would refuse it.
+- **`aws-deploy` never cancels in progress.** Killing an apply mid-flight desynchronises state.
+- **The role cannot mint access keys or lift the worker's boundaries.** IAM changes to the Claude cloud worker only succeed while the `infra/bootstrap/guardrails.yaml` boundaries stay attached.
+
 ## Bun-specific notes for CI
 
 - **Do not call `bun test` in CI** — it runs bun's native test runner, not Vitest. Always use `bun run test`.
