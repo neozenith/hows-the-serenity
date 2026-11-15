@@ -102,7 +102,7 @@ Both assume `vars.AWS_ROLE_ARN` (`gha-tfstate-hows-the-serenity`) through GitHub
 
 - **No `environment:` on these jobs.** It rewrites the OIDC subject and the role's trust policy, pinned to `refs/heads/main` and `pull_request`, would refuse it.
 - **`aws-deploy` never cancels in progress.** Killing an apply mid-flight desynchronises state.
-- **The role cannot mint access keys or lift the worker's boundaries.** IAM changes to the Claude cloud worker only succeed while the `infra/bootstrap/guardrails.yaml` boundaries stay attached.
+- **The role has no IAM rights.** The Claude cloud worker is shared across projects and managed by hand with the AWS CLI; this repo's pipeline never touches it.
 
 ## Bun-specific notes for CI
 

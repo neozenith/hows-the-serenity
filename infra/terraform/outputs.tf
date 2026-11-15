@@ -13,8 +13,3 @@ output "distribution_id" {
   description = "CloudFront distribution to invalidate after a deploy"
   value       = aws_cloudfront_distribution.site.id
 }
-
-output "worker_role_arn" {
-  description = "Role Claude cloud sessions assume (profile ccw)"
-  value       = aws_iam_role.worker.arn
-}
