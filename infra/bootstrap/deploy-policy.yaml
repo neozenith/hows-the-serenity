@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# The deliberate widening of this repo's GitHub Actions role.
+#
+# tfstate-role.yaml grants state access and NOTHING else. This stack attaches
+# an ADDITIONAL managed policy to that role, scoped to what infra/terraform/
+# manages: the site bucket, the CloudFront distribution in front of it, and the
+# Claude cloud worker's user, role and permission policies. Deleting this stack
+# puts the role straight back to state-only.
+#
+# IAM writes on the worker are conditional on the guardrails.yaml boundaries
+# being attached, so a Terraform change can reshape the worker's policies but
+# never lift it past its ceiling. Deploy guardrails.yaml first.
+#
+#   aws cloudformation deploy \
+#     --template-file infra/bootstrap/deploy-policy.yaml \
+#     --stack-name hows-the-serenity-deploy-policy \
+#     --region ap-southeast-2 \
+#     --capabilities CAPABILITY_IAM \
+#     --parameter-overrides GitHubRepo=hows-the-serenity
+
+Description: Additional deploy permissions for this repo's GitHub Actions role
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Description: Repo name. Derives the role name this policy attaches to.
+    AllowedPattern: "^[a-z0-9][a-z0-9._-]{0,62}$"
+
+  RoleNamePrefix:
+    Type: String
+    Description: Must match the prefix tfstate-role.yaml used, so this attaches to that role.
+    Default: gha-tfstate-
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,32}$"
+
+  # Matches local.site_bucket in infra/terraform/. Change both or neither.
+  SiteBucketName:
+    Type: String
+    Description: Bucket holding the built site. Empty derives hts-site-<account-id>.
+    Default: ""
+    AllowedPattern: "^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+
+Conditions:
+  DeriveSiteBucket: !Equals [!Ref SiteBucketName, ""]
+
+Resources:
+  DeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "Deploy permissions for ${GitHubRepo}: site bucket, CloudFront, Claude cloud worker IAM"
+      Roles:
+        - !Sub "${RoleNamePrefix}${GitHubRepo}"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnSiteBucket
+            Effect: Allow
+            Action: s3:*
+            Resource: !If
+              - DeriveSiteBucket
+              - - !Sub "arn:aws:s3:::hts-site-${AWS::AccountId}"
+                - !Sub "arn:aws:s3:::hts-site-${AWS::AccountId}/*"
+              - - !Sub "arn:aws:s3:::${SiteBucketName}"
+                - !Sub "arn:aws:s3:::${SiteBucketName}/*"
+
+          # A distribution's arn is unknown until it exists, so the create call
+          # cannot be scoped to it. The actions are enumerated instead.
+          - Sid: CloudFrontDistribution
+            Effect: Allow
+            Action:
+              - cloudfront:CreateDistribution
+              - cloudfront:CreateDistributionWithTags
+              - cloudfront:UpdateDistribution
+              - cloudfront:DeleteDistribution
+              - cloudfront:GetDistribution
+              - cloudfront:GetDistributionConfig
+              - cloudfront:ListDistributions
+              - cloudfront:TagResource
+              - cloudfront:UntagResource
+              - cloudfront:ListTagsForResource
+              - cloudfront:CreateInvalidation
+              - cloudfront:GetInvalidation
+              - cloudfront:CreateOriginAccessControl
+              - cloudfront:UpdateOriginAccessControl
+              - cloudfront:DeleteOriginAccessControl
+              - cloudfront:GetOriginAccessControl
+              - cloudfront:GetOriginAccessControlConfig
+              - cloudfront:ListOriginAccessControls
+              - cloudfront:ListCachePolicies
+              - cloudfront:GetCachePolicy
+            Resource: "*"
+
+          - Sid: ReadIam
+            Effect: Allow
+            Action:
+              - iam:GetPolicy
+              - iam:GetPolicyVersion
+              - iam:ListPolicyVersions
+              - iam:ListEntitiesForPolicy
+            Resource: "*"
+
+          # Role reads and metadata. No condition: none of these grant anything.
+          - Sid: WorkerRoleMetadata
+            Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:ListInstanceProfilesForRole
+              - iam:UpdateRole
+              - iam:UpdateRoleDescription
+              - iam:UpdateAssumeRolePolicy
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:DeleteRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/ClaudeCloudWorker"
+
+          # Every permission change on the role requires the ceiling to be its
+          # boundary, so the effective permissions stay inside the ceiling.
+          - Sid: WorkerRolePermissionsUnderCeiling
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:PutRolePermissionsBoundary
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/ClaudeCloudWorker"
+            Condition:
+              StringEquals:
+                iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/ClaudeCloudWorkerCeiling"
+
+          - Sid: WorkerUserMetadata
+            Effect: Allow
+            Action:
+              - iam:GetUser
+              - iam:GetUserPolicy
+              - iam:ListUserPolicies
+              - iam:ListAttachedUserPolicies
+              - iam:ListGroupsForUser
+              - iam:ListAccessKeys
+              - iam:ListSigningCertificates
+              - iam:ListSSHPublicKeys
+              - iam:ListServiceSpecificCredentials
+              - iam:ListMFADevices
+              - iam:GetLoginProfile
+              - iam:TagUser
+              - iam:UntagUser
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:user/claudecloudworker"
+
+          - Sid: WorkerUserPermissionsUnderCeiling
+            Effect: Allow
+            Action:
+              - iam:CreateUser
+              - iam:PutUserPermissionsBoundary
+              - iam:AttachUserPolicy
+              - iam:DetachUserPolicy
+              - iam:PutUserPolicy
+              - iam:DeleteUserPolicy
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:user/claudecloudworker"
+            Condition:
+              StringEquals:
+                iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/ClaudeCloudWorkerUserCeiling"
+
+          # The worker's permission policies. The hyphen keeps the three
+          # guardrail policies (ClaudeCloudWorkerCeiling and friends) out of reach.
+          - Sid: WorkerPermissionPolicies
+            Effect: Allow
+            Action:
+              - iam:CreatePolicy
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicy
+              - iam:DeletePolicyVersion
+              - iam:TagPolicy
+              - iam:UntagPolicy
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:policy/ClaudeCloudWorker-*"
+
+          # The access key is created by hand and pasted into the cloud
+          # environment. It never passes through Terraform state or CI.
+          - Sid: NeverMintCredentialsOrLiftBoundaries
+            Effect: Deny
+            Action:
+              - iam:CreateAccessKey
+              - iam:UpdateAccessKey
+              - iam:CreateLoginProfile
+              - iam:UpdateLoginProfile
+              - iam:DeleteRolePermissionsBoundary
+              - iam:DeleteUserPermissionsBoundary
+            Resource: "*"
+
+Outputs:
+  PolicyArn:
+    Description: The managed policy attached to this repo's role
+    Value: !Ref DeployPolicy

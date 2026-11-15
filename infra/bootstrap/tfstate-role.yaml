@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+# One GitHub Actions role, scoped to one repo's Terraform state bucket.
+#
+# REUSABLE: deploy this template once per repo. Every repo-specific value is a
+# parameter, so the only thing that changes between runs is the stack name and
+# the repo. There is no first-run special case, because the OIDC provider is a
+# separate stack (oidc-provider.yaml) that all of these trust.
+#
+# SCOPE: this role reaches its own state bucket and NOTHING ELSE. It grants no
+# permission to create, read or modify any other resource in any account. A
+# workflow assuming it can run `terraform init` and read and write its own
+# state, and will fail the moment it tries to manage real infrastructure. That
+# is deliberate and is the whole scope of this template. Widening it is a
+# separate, deliberate change, made per repo.
+#
+# The bucket is created by tfstate-bucket.yaml beside this file.
+# Both templates take GitHubRepo and derive the same name, so they cannot
+# disagree about which bucket this role is scoped to.
+#
+#   aws cloudformation deploy \
+#     --template-file tfstate-role.yaml \
+#     --stack-name hows-the-serenity-tfstate-role \
+#     --region ap-southeast-2 \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --parameter-overrides GitHubRepo=hows-the-serenity
+#
+# See README.md in this folder.
+
+Description: GitHub Actions state-only role for one repo (bootstrap only)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: {default: Which repo}
+        Parameters: [GitHubOrg, GitHubRepo, AllowedBranch, SubjectPrefix]
+      - Label: {default: Which bucket}
+        Parameters: [StateBucketName, StateKeyPrefix]
+      - Label: {default: Trust}
+        Parameters: [RoleNamePrefix, MaxSessionSeconds]
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: GitHub organisation or user that owns the repo
+    Default: neozenith
+    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+
+  GitHubRepo:
+    Type: String
+    Description: Repo name, without the org. This is the only parameter that must change per run.
+    AllowedPattern: "^[A-Za-z0-9._-]{1,100}$"
+
+  AllowedBranch:
+    Type: String
+    Description: The one branch trusted to apply. Pull requests are trusted separately and always.
+    Default: main
+    AllowedPattern: "^[A-Za-z0-9._/-]{1,255}$"
+
+  # GitHub can issue immutable subject claims, where the sub carries numeric
+  # org and repo ids rather than their names:
+  #
+  #   repo:org@324847963/name@1376730649:pull_request
+  #
+  # That is strictly better - renaming or transferring a repo cannot redirect
+  # a trust policy onto something else - but it means a policy written against
+  # org/name never matches. The prefix is not derivable from the names, so it
+  # is a parameter. deploy.sh reads it from the GitHub API.
+  SubjectPrefix:
+    Type: String
+    Description: OIDC sub prefix up to but excluding the colon. Empty derives repo:<org>/<repo>.
+    Default: ""
+    AllowedPattern: "^$|^repo:[A-Za-z0-9._@/-]{1,200}$"
+
+  # Empty derives <repo>-tfstate-<account-id>, exactly as tfstate-bucket.yaml
+  # does. Override both templates together, or neither.
+  StateBucketName:
+    Type: String
+    Description: State bucket for this repo. Empty means derive it from GitHubRepo and the account id.
+    Default: ""
+    AllowedPattern: "^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+
+  # Empty grants the whole bucket, which is the right default when the bucket
+  # belongs to exactly one repo. Set it to confine a repo to one prefix when
+  # several share a bucket.
+  StateKeyPrefix:
+    Type: String
+    Description: Object prefix this role may touch. Empty means the whole bucket.
+    Default: ""
+    AllowedPattern: "^$|^[A-Za-z0-9!_.*'()/-]{1,512}$"
+
+  RoleNamePrefix:
+    Type: String
+    Description: Role is named <prefix><repo>, so it is predictable from the repo alone
+    Default: gha-tfstate-
+    AllowedPattern: "^[A-Za-z0-9+=,.@_-]{1,32}$"
+
+  MaxSessionSeconds:
+    Type: Number
+    Description: Session ceiling. A state read and write needs minutes, not hours.
+    Default: 3600
+    MinValue: 900
+    MaxValue: 43200
+
+Conditions:
+  DeriveBucketName: !Equals [!Ref StateBucketName, ""]
+  GrantWholeBucket: !Equals [!Ref StateKeyPrefix, ""]
+  DeriveSubjectPrefix: !Equals [!Ref SubjectPrefix, ""]
+
+Resources:
+  StateRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${RoleNamePrefix}${GitHubRepo}"
+      Description: !Sub "GitHub Actions state-only access for ${GitHubOrg}/${GitHubRepo}"
+      MaxSessionDuration: !Ref MaxSessionSeconds
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              # Scoped to one branch and to pull requests, never to
+              # repo:org/name:* which would trust any ref anyone can push.
+              # A fork pull request cannot reach this: GitHub withholds
+              # id-token write permission from fork workflows.
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub
+                    - "${Prefix}:ref:refs/heads/${AllowedBranch}"
+                    - Prefix: !If [DeriveSubjectPrefix, !Sub "repo:${GitHubOrg}/${GitHubRepo}", !Ref SubjectPrefix]
+                  - !Sub
+                    - "${Prefix}:pull_request"
+                    - Prefix: !If [DeriveSubjectPrefix, !Sub "repo:${GitHubOrg}/${GitHubRepo}", !Ref SubjectPrefix]
+      Policies:
+        - PolicyName: TerraformStateOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # One bucket, named outright. No wildcard across buckets, so one
+              # repo's workflow cannot reach another repo's state.
+              - Sid: ListOwnStateBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !If
+                  - DeriveBucketName
+                  - !Sub "arn:aws:s3:::${GitHubRepo}-tfstate-${AWS::AccountId}"
+                  - !Sub "arn:aws:s3:::${StateBucketName}"
+                Condition: !If
+                  - GrantWholeBucket
+                  - !Ref AWS::NoValue
+                  - StringLike:
+                      s3:prefix: !Sub "${StateKeyPrefix}*"
+              # Delete is needed because Terraform removes the .tflock object
+              # when it releases a lock. Native S3 locking means there is no
+              # DynamoDB table to grant anything on.
+              - Sid: ReadWriteOwnState
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !If
+                  - DeriveBucketName
+                  - !Sub "arn:aws:s3:::${GitHubRepo}-tfstate-${AWS::AccountId}/${StateKeyPrefix}*"
+                  - !Sub "arn:aws:s3:::${StateBucketName}/${StateKeyPrefix}*"
+
+Outputs:
+  RoleArn:
+    Description: Value for role-to-assume in this repo's workflow
+    Value: !GetAtt StateRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-RoleArn"
+  StateBucket:
+    Description: Bucket this role is scoped to
+    Value: !If
+      - DeriveBucketName
+      - !Sub "${GitHubRepo}-tfstate-${AWS::AccountId}"
+      - !Ref StateBucketName
+  TrustedSubjects:
+    Description: The only two OIDC subjects this role accepts
+    Value: !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${AllowedBranch} and :pull_request"
+
