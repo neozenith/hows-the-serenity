@@ -4,13 +4,11 @@ AWSTemplateFormatVersion: "2010-09-09"
 #
 # tfstate-role.yaml grants state access and NOTHING else. This stack attaches
 # an ADDITIONAL managed policy to that role, scoped to what infra/terraform/
-# manages: the site bucket, the CloudFront distribution in front of it, and the
-# Claude cloud worker's user, role and permission policies. Deleting this stack
-# puts the role straight back to state-only.
+# manages: the site bucket and the CloudFront distribution in front of it.
+# Deleting this stack puts the role straight back to state-only.
 #
-# IAM writes on the worker are conditional on the guardrails.yaml boundaries
-# being attached, so a Terraform change can reshape the worker's policies but
-# never lift it past its ceiling. Deploy guardrails.yaml first.
+# No IAM rights at all. The Claude cloud worker is shared across projects and
+# managed by hand with the AWS CLI, so this repo's pipeline cannot touch it.
 #
 #   aws cloudformation deploy \
 #     --template-file infra/bootstrap/deploy-policy.yaml \
@@ -88,106 +86,6 @@ Resources:
               - cloudfront:ListOriginAccessControls
               - cloudfront:ListCachePolicies
               - cloudfront:GetCachePolicy
-            Resource: "*"
-
-          - Sid: ReadIam
-            Effect: Allow
-            Action:
-              - iam:GetPolicy
-              - iam:GetPolicyVersion
-              - iam:ListPolicyVersions
-              - iam:ListEntitiesForPolicy
-            Resource: "*"
-
-          # Role reads and metadata. No condition: none of these grant anything.
-          - Sid: WorkerRoleMetadata
-            Effect: Allow
-            Action:
-              - iam:GetRole
-              - iam:GetRolePolicy
-              - iam:ListRolePolicies
-              - iam:ListAttachedRolePolicies
-              - iam:ListInstanceProfilesForRole
-              - iam:UpdateRole
-              - iam:UpdateRoleDescription
-              - iam:UpdateAssumeRolePolicy
-              - iam:TagRole
-              - iam:UntagRole
-              - iam:DeleteRole
-            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/ClaudeCloudWorker"
-
-          # Every permission change on the role requires the ceiling to be its
-          # boundary, so the effective permissions stay inside the ceiling.
-          - Sid: WorkerRolePermissionsUnderCeiling
-            Effect: Allow
-            Action:
-              - iam:CreateRole
-              - iam:PutRolePermissionsBoundary
-              - iam:AttachRolePolicy
-              - iam:DetachRolePolicy
-              - iam:PutRolePolicy
-              - iam:DeleteRolePolicy
-            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/ClaudeCloudWorker"
-            Condition:
-              StringEquals:
-                iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/ClaudeCloudWorkerCeiling"
-
-          - Sid: WorkerUserMetadata
-            Effect: Allow
-            Action:
-              - iam:GetUser
-              - iam:GetUserPolicy
-              - iam:ListUserPolicies
-              - iam:ListAttachedUserPolicies
-              - iam:ListGroupsForUser
-              - iam:ListAccessKeys
-              - iam:ListSigningCertificates
-              - iam:ListSSHPublicKeys
-              - iam:ListServiceSpecificCredentials
-              - iam:ListMFADevices
-              - iam:GetLoginProfile
-              - iam:TagUser
-              - iam:UntagUser
-            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:user/claudecloudworker"
-
-          - Sid: WorkerUserPermissionsUnderCeiling
-            Effect: Allow
-            Action:
-              - iam:CreateUser
-              - iam:PutUserPermissionsBoundary
-              - iam:AttachUserPolicy
-              - iam:DetachUserPolicy
-              - iam:PutUserPolicy
-              - iam:DeleteUserPolicy
-            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:user/claudecloudworker"
-            Condition:
-              StringEquals:
-                iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/ClaudeCloudWorkerUserCeiling"
-
-          # The worker's permission policies. The hyphen keeps the three
-          # guardrail policies (ClaudeCloudWorkerCeiling and friends) out of reach.
-          - Sid: WorkerPermissionPolicies
-            Effect: Allow
-            Action:
-              - iam:CreatePolicy
-              - iam:CreatePolicyVersion
-              - iam:DeletePolicy
-              - iam:DeletePolicyVersion
-              - iam:TagPolicy
-              - iam:UntagPolicy
-            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:policy/ClaudeCloudWorker-*"
-
-          # The access key is created by hand and pasted into the cloud
-          # environment. It never passes through Terraform state or CI.
-          - Sid: NeverMintCredentialsOrLiftBoundaries
-            Effect: Deny
-            Action:
-              - iam:CreateAccessKey
-              - iam:UpdateAccessKey
-              - iam:CreateLoginProfile
-              - iam:UpdateLoginProfile
-              - iam:DeleteRolePermissionsBoundary
-              - iam:DeleteUserPermissionsBoundary
             Resource: "*"
 
 Outputs:

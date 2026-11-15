@@ -28,7 +28,6 @@ deploy() { # deploy <template> <stack-suffix> [extra args...]
 deploy tfstate-bucket.yaml tfstate-bucket --parameter-overrides "GitHubRepo=${REPO}"
 deploy tfstate-role.yaml tfstate-role --capabilities CAPABILITY_NAMED_IAM \
 	--parameter-overrides "GitHubOrg=${OWNER}" "GitHubRepo=${REPO}" "SubjectPrefix=${SUBJECT_PREFIX}"
-deploy guardrails.yaml guardrails --capabilities CAPABILITY_NAMED_IAM
 deploy deploy-policy.yaml deploy-policy --capabilities CAPABILITY_IAM \
 	--parameter-overrides "GitHubRepo=${REPO}"
 
