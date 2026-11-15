@@ -209,6 +209,21 @@ build time; production deploys (GitHub Pages) ship the map only.
 
 ---
 
+## Travel-time vocabulary
+
+| Term | Definition |
+|---|---|
+| **Isochrone** | The area reachable from a point within a set time by **walking, cycling or driving a personal car**. Never public transport. |
+| **In-vehicle time** | In an isochrone, time spent **driving a personal car**. It never means time on a train, tram or bus. |
+| **Walkability corridor** | The dissolved walking isochrones around a public-transport line's stops: how far you can walk to reach the service. Example: `iso_foot_5` / `iso_foot_15`. |
+| **Commute contour** | A line joining places with the same travel time to a hub when **riding** a train, tram or bus. Labelled on the map like `train 15m`. Aliases: commute hull. |
+
+A walkability corridor and a commute contour for the same mode are different
+outcomes: one answers "can I walk to the bus?", the other "where does the bus
+get me in 30 minutes?".
+
+---
+
 ## Tile layers
 
 Pre-tiled MVT/XYZ trees rendered by deck.gl's `MVTLayer`. Output dirs

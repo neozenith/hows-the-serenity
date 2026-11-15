@@ -1,6 +1,7 @@
 .PHONY: help install install-ts install-py dev agentic-dev build preview clean
 .PHONY: audit audit-ts audit-py
 .PHONY: format format-ts format-py format-check format-check-ts format-check-py
+.PHONY: adrs adr-audit
 .PHONY: lint lint-ts lint-py lint-fix lint-fix-ts lint-fix-py
 .PHONY: typecheck typecheck-ts typecheck-py
 .PHONY: test test-ts test-py test-watch test-ui test-e2e test-e2e-ui e2e-report
@@ -173,12 +174,26 @@ e2e-report: install-ts ## Render e2e-screenshots/ into one review markdown (REPO
 	uvx --from md-toc md_toc --in-place --no-list-coherence github --header-levels 3 e2e-screenshots/REPORT.md
 
 # =============================================================================
+# Architecture decision records (okf-yaml bundle in adrs/)
+# =============================================================================
+# Records are authored as adrs/NNNN-slug.yml; every adrs/*.md, graph.json and
+# graph.html is generated. Edit the .yml, then `make adrs`.
+
+ADR_UV := uv run --no-project --with PyYAML --with Jinja2 --with jsonschema
+
+adrs: ## Regenerate ADR markdown, index and graph from adrs/*.yml
+	$(ADR_UV) adrs/okf_render.py adrs --schema adrs/record.schema.json
+
+adr-audit: ## Audit ADRs (schema, freshness, ids, immutability, relations, wiring)
+	$(ADR_UV) adrs/adr_audit.py .
+
+# =============================================================================
 # Inner-loop meta-targets — `make fix ci` is the canonical sequence
 # =============================================================================
 
 fix: install format lint-fix ## Auto-fix all fixable lint + format issues across both languages
 
-ci: audit build format-check typecheck lint test test-e2e test-e2e-explore etl-forecast-gate ## Full CI gate (mirrors GitHub Actions)
+ci: audit build format-check typecheck lint adr-audit test test-e2e test-e2e-explore etl-forecast-gate ## Full CI gate (mirrors GitHub Actions)
 
 # =============================================================================
 # ETL pipeline — Make-native file rules

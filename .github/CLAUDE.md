@@ -36,6 +36,7 @@ Two jobs: `build` always runs; `deploy-pages` only runs on push to `main`.
 3. `bun install --frozen-lockfile` — reproducible install
 4. `bun run scripts/audit-gate.ts` — fail on new high+ severity advisories (wraps `bun audit --json`; allowlist with written justifications lives in the script for advisories with no patched release)
 5. `bunx --bun biome ci .` — lint + format check (no auto-fix; CI mode)
+   - `make adr-audit` — audits the okf-yaml decision records in `adrs/` (schema, freshness, ids, immutability, relations, wiring)
 6. `bun run build` — `tsc -b && vite build` (uses default `base: "/"`)
 7. `bun run test --run --passWithNoTests` — Vitest single-pass
 8. `actions/cache@v5` — restore Playwright browsers from `~/.cache/ms-playwright`

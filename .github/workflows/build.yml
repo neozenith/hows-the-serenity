@@ -67,6 +67,10 @@ jobs:
           uv run ruff check etl
           uv run ruff format --check etl
 
+      - name: Audit architecture decisions
+        # Schema, freshness, ids, immutability, relations and wiring of adrs/.
+        run: make adr-audit
+
       - name: Type check (Python)
         run: uv run mypy etl
 
